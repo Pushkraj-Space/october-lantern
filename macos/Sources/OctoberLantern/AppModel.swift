@@ -411,7 +411,9 @@ final class AppModel: ObservableObject {
     /// else the first installed agent. `nil` when no agent can start.
     var defaultAgentKind: AgentKind? {
         let installed = installedKinds ?? []
-        let usable = { (k: AgentKind) in installed.contains(k) || (k == .october && self.harness?.status != "failed") }
+        // October Harness counts only once it's actually here (on PATH or installed by Lantern):
+        // installing it is a large download, and it can't use Lantern's October sign-in yet.
+        let usable = { (k: AgentKind) in installed.contains(k) || (k == .october && self.harness?.isReady == true) }
         for kind in [AgentKind(rawValue: prefs.defaultAgent), .claude, .codex] where usable(kind) { return kind }
         return installed.first
     }
@@ -426,9 +428,9 @@ final class AppModel: ObservableObject {
         engine.prepareHarness()
     }
 
-    /// When October is the default agent, gets October Harness ready before it's needed.
+    /// Kept for later: October Harness is installed only when someone picks it.
     private func prepareHarnessIfDefault() {
-        if defaultAgentKind == .october { prepareHarness() }
+        // October Harness is installed only when someone picks it, not by opening New Session.
     }
 
     private func harnessChanged(_ status: EngineMessage.HarnessStatus) {
