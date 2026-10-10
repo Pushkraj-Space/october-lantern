@@ -28,11 +28,11 @@ What the website needs for the beta. Product facts come from [product guide](doc
 - **FAQ entries** from the product guide FAQ, especially "Why did macOS ask whether Lantern can control Terminal?" and "How do I uninstall it?".
 - **Support contact:** hey@october.dev. The app's Report a Problem uses the same address.
 - **Point & Ask** (0.4+): press ⌃⌥P or the pill's dotted-box button, drag a box around anything on screen, then **Ask** (October's AI answers in a card, needs October sign-in; Pro and Max use the plan's Assistant credit, the free plan gets 20 questions a day) or **Send to @agent**. Exact wording and privacy: the product guide's Point & Ask entries.
-- **The assistant** (0.4.3+): click the lantern. **Ask** chats with October's AI and knows what your agents are doing ("which agent needs me first?"); **Do** turns a request into a filled-in New Session that you start yourself. Waiting has its own tray button.
+- **Ask Lantern** (0.5+): click the lantern; the box at the bottom of Waiting. Ask anything and October's AI answers, knowing what your agents are doing ("which agent needs me first?"). Ask it to do something and it starts an agent on it after a 3-second Starting… Cancel card.
 
 ## Don't claim
 
 - Automatic routing ("say it once and it picks the agent") doesn't exist yet. Screenshots go with new sessions and Point & Ask, not with ordinary replies.
-- The assistant's **Do** doesn't start anything by itself: it fills in New Session, and you press Start.
+- Don't advertise October Bus, multiplayer, the phone app, October Desktop pairing, the toolkit list or app Tasks in launch copy. Lead with Claude Code and Codex: see who's waiting, read, reply; Point & Ask and Ask Lantern as the extras.
 - October connections: describe them exactly as in the product guide's "What's true today" table. Full October Desktop support needs October 1.0.52+. The phone connection is built but has not been tested against the real phone app: don't advertise it until a live pairing and reply have been confirmed.
 - Windows or Linux.

@@ -18,8 +18,7 @@ struct WelcomeView: View {
             Group {
                 switch step {
                 case 0: intro
-                case 1: agents
-                case 2: setup
+                case 1: setup
                 default: done
                 }
             }
@@ -29,16 +28,16 @@ struct WelcomeView: View {
 
             HStack {
                 HStack(spacing: 6) {
-                    ForEach(0..<4) { i in
+                    ForEach(0..<3) { i in
                         Circle().fill(i == step ? Theme.amber : Color.white.opacity(0.2)).frame(width: 6, height: 6)
                     }
                 }
                 Spacer()
-                if step > 0 && step < 3 {
+                if step > 0 && step < 2 {
                     Button("Back") { step -= 1 }.buttonStyle(.plain).foregroundStyle(Theme.muted)
                 }
-                Button(step == 3 ? "Start using Lantern" : "Continue") {
-                    if step == 3 { onDone() } else { step += 1 }
+                Button(step == 2 ? "Start using Lantern" : "Continue") {
+                    if step == 2 { onDone() } else { step += 1 }
                 }
                 .buttonStyle(AmberButtonStyle())
                 .keyboardShortcut(.defaultAction)
@@ -62,6 +61,10 @@ struct WelcomeView: View {
             Text("A small light on the edge of your screen that watches every coding agent on your Mac, and lights up when one of them needs you.")
                 .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            Text(model.agents.isEmpty ? "No agents running yet. Start Claude Code, Codex or another agent as usual and Lantern finds it."
+                 : "Lantern already found \(model.agents.count) agent\(model.agents.count == 1 ? "" : "s") on this Mac.")
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.amber).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 12) {
                 StateRow(glow: nil, count: nil, title: "Dim", detail: "Nothing needs you.")
                 StateRow(glow: .orange, count: nil, title: "Soft glow", detail: "Your agents are working.")
@@ -70,36 +73,6 @@ struct WelcomeView: View {
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 14).fill(Theme.faint))
             .padding(.top, 6)
-        }
-    }
-
-    private var agents: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(model.agents.isEmpty ? "No agents running right now" : "Lantern found \(model.agents.count) agent\(model.agents.count == 1 ? "" : "s")")
-                .font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.ink)
-            Text(model.agents.isEmpty
-                 ? "Start Claude Code, Codex, OpenCode, Pi, Gemini or another agent in any terminal and it will appear here. You don't need to start them any differently."
-                 : "These are running on your Mac right now. You don't need to start them any differently: Lantern finds agents in any terminal.")
-                .font(.system(size: 13.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            if !model.agents.isEmpty {
-                VStack(spacing: 4) {
-                    ForEach(model.ranked.prefix(6)) { AgentRow(agent: $0, selected: false) }
-                    if model.agents.count > 6 {
-                        Text("and \(model.agents.count - 6) more").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                    }
-                }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Theme.faint))
-            }
-            Text("Works with").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
-            HStack(spacing: 10) {
-                ForEach(["claude", "codex", "opencode", "pi", "gemini", "grok", "cursor", "qwen", "october"], id: \.self) { k in
-                    if let img = Assets.harness(AgentKind(rawValue: k)) {
-                        Image(nsImage: img).resizable().aspectRatio(contentMode: .fit).frame(width: 26, height: 26)
-                            .clipShape(RoundedRectangle(cornerRadius: 6)).help(AgentKind(rawValue: k).displayName)
-                    }
-                }
-            }
         }
     }
 
@@ -176,12 +149,11 @@ struct WelcomeView: View {
             Text("You're set").font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.ink)
             VStack(alignment: .leading, spacing: 10) {
                 Tip(symbol: "arrow.right.to.line", text: "The lantern sits on the \(prefs.edge) edge of your screen. Drag it to move it.")
-                Tip(symbol: "cursorarrow", text: "Hover over it to see everything it can do. The tray button shows who's waiting.")
-                Tip(symbol: "bubble.left.and.bubble.right", text: "Click any agent to read its conversation and reply to it.")
-                Tip(symbol: "sparkles", text: "Click the lantern to ask anything, like \"which agent needs me first?\", or to set up a task.")
+                Tip(symbol: "cursorarrow", text: "Click it to see who's waiting. Click any agent to read its conversation and reply.")
+                Tip(symbol: "sparkles", text: "Ask Lantern at the bottom of that panel: \"which agent needs me first?\", or tell it what to do and it starts an agent.")
                 Tip(symbol: "cursorarrow.and.square.on.square.dashed", text: "Point & Ask: press \(Preferences.shared.pointAsk == .none ? "the dotted-box button" : Preferences.shared.pointAsk.label), drag a box around anything on screen and ask about it.")
                 Tip(symbol: "plus", text: "Start a new session with any agent from the + button.")
-                Tip(symbol: "menubar.rectangle", text: "Settings, updates and help are in the lantern in your menu bar.")
+                Tip(symbol: "menubar.rectangle", text: "Right-click the lantern, or use the lantern in your menu bar, for Settings and more.")
             }
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 14).fill(Theme.faint))

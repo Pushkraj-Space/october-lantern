@@ -644,14 +644,12 @@ struct OctoberView: View {
                 OctoberLogo(size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("October").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                    Text("Lantern works on its own. Connecting to October adds more.")
+                    Text("Optional. Sign in for Ask and Point & Ask answers; connect October Desktop to see its agents here.")
                         .font(.system(size: 11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
             }
             AccountCard()
-            DesktopCard(model: model)
-            TeamCard()
-            PhoneCard(signedIn: account.signedIn, planAllowsPhone: account.plan?.features?.mobile?.enabled)
+            DesktopCard(model: model, compact: true)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)

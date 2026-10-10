@@ -3,7 +3,7 @@ import LanternCore
 import SwiftUI
 
 enum PanelMode: Equatable {
-    case inbox, agents, newSession, october, assistant
+    case inbox, agents, newSession, october
 
     /// The inbox and agent list share tabs and the composer; the others are standalone.
     var isList: Bool { self == .inbox || self == .agents }
@@ -208,8 +208,10 @@ final class AppModel: ObservableObject {
         panel = panel == mode ? nil : mode
     }
 
+    /// Reply to an agent (opens its conversation, where the composer is), or with no agent, the
+    /// "Ask Lantern" box.
     func compose(to agent: Agent?) {
-        if let agent { targetId = agent.id }
+        if let agent { return openChat(agent) }
         if !(panel?.isList ?? false) { panel = .inbox }
         composeFocusToken += 1
     }

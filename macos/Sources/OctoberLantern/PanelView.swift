@@ -4,6 +4,7 @@ import SwiftUI
 struct PanelView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var dictation: Dictation
+    @ObservedObject var assistant = Assistant.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,11 +16,11 @@ struct PanelView: View {
             case .october:
                 PanelTitle(title: "October", model: model)
                 OctoberView(model: model)
-            case .assistant:
-                AssistantView(model: model)
             default:
                 if let agent = model.chatAgent {
                     ChatView(agent: agent, model: model)
+                } else if !assistant.turns.isEmpty {
+                    AssistantThread(model: model)
                 } else {
                 header
                 ScrollView {
@@ -45,7 +46,7 @@ struct PanelView: View {
                     .transition(.opacity)
             }
             if model.panel?.isList ?? true {
-                Composer(model: model, dictation: dictation)
+                if model.chatAgent != nil { Composer(model: model, dictation: dictation) } else { AskBox(model: model) }
             }
         }
         .frame(width: 380)

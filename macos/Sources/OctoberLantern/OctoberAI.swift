@@ -86,6 +86,9 @@ enum OctoberAI {
     enum Piece {
         case text(String)
         case note(String)
+        /// Work the assistant decided to start (chat mode): a prompt for a coding agent, and the
+        /// agent and project only when the user named them.
+        case task(prompt: String, agent: String?, project: String?)
     }
 
     /// "18 free questions left today" from a free account's `done` event.
@@ -134,6 +137,11 @@ enum OctoberAI {
                   let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             switch event["type"] as? String {
             case "delta": if let text = event["text"] as? String { continuation.yield(.text(text)) }
+            case "task":
+                if let t = event["task"] as? [String: Any], let prompt = t["prompt"] as? String,
+                   !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    continuation.yield(.task(prompt: String(prompt.prefix(4000)), agent: t["agent"] as? String, project: t["project"] as? String))
+                }
             case "error": throw Failure.unavailable(event["message"] as? String ?? "October's AI stopped answering.")
             case "done":
                 if let note = note(done: event) { continuation.yield(.note(note)) }
