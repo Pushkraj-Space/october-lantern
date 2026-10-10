@@ -192,7 +192,7 @@ struct AssistantThread: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Button { assistant.clear() } label: {
-                    Label(model.inbox.isEmpty ? "Agents" : "Agents · \(model.inbox.count) waiting", systemImage: "chevron.left")
+                    Label("New question", systemImage: "chevron.left")
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
                 }
                 .buttonStyle(.plain)
@@ -325,5 +325,62 @@ struct AskBox: View {
 
     private var canSubmit: Bool {
         !assistant.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !assistant.asking
+    }
+}
+
+/// Lantern's home (click the lantern): Ask Lantern, with what's waiting on you a click away.
+struct AssistantHome: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var assistant = Assistant.shared
+    @ObservedObject var account = OctoberAccount.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !assistant.turns.isEmpty {
+                AssistantThread(model: model)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("ASK LANTERN").font(.system(size: 11, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.ink)
+                        Spacer()
+                        Button { model.panel = nil } label: {
+                            Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted).frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain).keyboardShortcut(.cancelAction).help("Close")
+                    }
+                    if !model.inbox.isEmpty {
+                        Button { model.panel = .inbox } label: {
+                            HStack(spacing: 8) {
+                                Circle().fill(Theme.amber).frame(width: 7, height: 7)
+                                Text(model.inbox.count == 1 ? "1 agent is waiting on you" : "\(model.inbox.count) agents are waiting on you")
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.amber.opacity(0.12)))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.amber.opacity(0.3)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if account.signedIn {
+                        Text("Ask anything about your agents, or tell Lantern what to do and it starts an agent on it.")
+                            .font(.system(size: 11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        ForEach(["What are my agents doing?", "Which agent needs me first, and why?", "Add tests for the last change in this repo"], id: \.self) { idea in
+                            Button { assistant.text = idea } label: {
+                                Text(idea).font(.system(size: 12)).foregroundStyle(Theme.ink.opacity(0.85)).lineLimit(1)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.faint))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+            }
+            AskBox(model: model)
+        }
+        .onAppear { model.composeFocusToken += 1 }
     }
 }

@@ -16,11 +16,11 @@ struct PanelView: View {
             case .october:
                 PanelTitle(title: "October", model: model)
                 OctoberView(model: model)
+            case .assistant:
+                AssistantHome(model: model)
             default:
                 if let agent = model.chatAgent {
                     ChatView(agent: agent, model: model)
-                } else if !assistant.turns.isEmpty {
-                    AssistantThread(model: model)
                 } else {
                 header
                 ScrollView {
@@ -46,7 +46,7 @@ struct PanelView: View {
                     .transition(.opacity)
             }
             if model.panel?.isList ?? true {
-                if model.chatAgent != nil { Composer(model: model, dictation: dictation) } else { AskBox(model: model) }
+                if model.chatAgent != nil { Composer(model: model, dictation: dictation) }
             }
         }
         .frame(width: 380)

@@ -23,12 +23,12 @@ struct PillView: View {
     var body: some View {
         VStack(spacing: 8) {
             LanternButton(count: model.badgeCount, waiting: !model.inbox.isEmpty, working: model.anyWorking, onTap: {
-                // The lantern opens what's waiting on you, with "Ask Lantern" at the bottom.
-                model.toggle(.inbox)
+                // The lantern opens Lantern's home: Ask Lantern, and what's waiting on you.
+                model.toggle(.assistant)
             }, onDrag: onDrag, onDragEnd: onDragEnd)
             .contextMenu {
-                Button("Waiting and Ask Lantern") { model.panel = .inbox }
-                Button("All Agents") { model.panel = .agents }
+                Button("Ask Lantern") { model.panel = .assistant }
+                Button("Your Agents") { model.panel = .inbox }
                 Button("New Session…") { model.startNew() }
                 Button("Point & Ask") { PointAsk.shared.start(fromPill: true) }
                 Button(dictation.isActive ? "Stop Dictating" : "Dictate a Reply") { model.toggleDictation() }
@@ -51,8 +51,8 @@ struct PillView: View {
             if expanded {
                 VStack(spacing: 6) {
                     Rectangle().fill(Theme.stroke).frame(width: 22, height: 1).padding(.bottom, 2)
-                    PillIcon(symbol: "square.stack.3d.up", active: model.panel == .agents, help: "All agents") {
-                        model.toggle(.agents)
+                    PillIcon(symbol: "square.stack.3d.up", active: model.panel?.isList == true, help: "Your agents") {
+                        model.toggle(.inbox)
                     }
                     PillIcon(symbol: "plus", active: model.panel == .newSession, help: "New session, or a task for the app you're in") {
                         model.startNew()
@@ -117,7 +117,7 @@ struct LanternButton: View {
             }
         }
         .contentShape(Circle())
-        .help(count > 0 ? "\(count) new, waiting on you" : "Waiting · Ask Lantern")
+        .help(count > 0 ? "\(count) new, waiting on you · Ask Lantern" : "Ask Lantern")
         .gesture(
             DragGesture(minimumDistance: 4)
                 .onChanged { _ in onDrag() }
