@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import LanternCore
 import SwiftUI
 
@@ -48,6 +49,11 @@ final class AppModel: ObservableObject {
     /// Installed agents; `nil` until the engine has checked.
     @Published private(set) var installedKinds: [AgentKind]?
     @Published private(set) var tmuxAvailable = false
+    /// October Harness (built in, installed on first use); `nil` until the engine has said.
+    @Published private(set) var harness: EngineMessage.HarnessStatus?
+    /// A launch waiting for October Harness to finish installing.
+    private var launchAfterHarness: (() -> Void)?
+    private var octoberSessionWatch: AnyCancellable?
     @Published private(set) var launching = false
     /// Models each agent can start with, by kind, once the engine has listed them.
     @Published private(set) var models: [String: EngineMessage.ModelList] = [:]
@@ -133,8 +139,19 @@ final class AppModel: ObservableObject {
             self?.installedKinds = installed.kinds
             self?.tmuxAvailable = installed.tmux
         }
+        engine.onHarness = { [weak self] status in self?.harnessChanged(status) }
+        // October launches sign in with your October account: the engine keeps the access token
+        // in memory (never the refresh token).
+        octoberSessionWatch = OctoberAccount.shared.$session.sink { [weak self] session in
+            self?.engine.octoberSession(accessToken: session?.accessToken, expiresAt: session?.expiresAt)
+        }
         engine.onReady = { [weak self] in
             OctoberAccount.shared.engineReady()
+            if let self {
+                let s = OctoberAccount.shared.session
+                self.engine.octoberSession(accessToken: s?.accessToken, expiresAt: s?.expiresAt)
+                if self.launchAfterHarness != nil { self.engine.prepareHarness() }
+            }
             // Fetch October Bus a minute after start, so the first session on it doesn't wait.
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(60))
@@ -381,7 +398,61 @@ final class AppModel: ObservableObject {
     func startNew() {
         if panel == .newSession { return panel = nil }
         AppContext.shared.capture()
+        prepareHarnessIfDefault()
         panel = .newSession
+    }
+
+    // MARK: Default agent and October Harness
+
+    /// The agent new sessions and tasks start with: the `defaultAgent` preference if it can start
+    /// (October counts when Lantern can install October Harness), else Claude Code, else Codex,
+    /// else the first installed agent. `nil` when no agent can start.
+    var defaultAgentKind: AgentKind? {
+        let installed = installedKinds ?? []
+        let usable = { (k: AgentKind) in installed.contains(k) || (k == .october && self.harness?.status != "failed") }
+        for kind in [AgentKind(rawValue: prefs.defaultAgent), .claude, .codex] where usable(kind) { return kind }
+        return installed.first
+    }
+
+    /// October can start now: on PATH, or October Harness installed.
+    var octoberReady: Bool { harness?.isReady == true || (installedKinds ?? []).contains(.october) }
+
+    /// Installs October Harness in the background if it isn't ready (no UI waits on it; `harness`
+    /// follows its progress). Safe to call often.
+    func prepareHarness() {
+        guard !octoberReady, harness?.status != "installing" else { return }
+        engine.prepareHarness()
+    }
+
+    /// When October is the default agent, gets October Harness ready before it's needed.
+    private func prepareHarnessIfDefault() {
+        if defaultAgentKind == .october { prepareHarness() }
+    }
+
+    private func harnessChanged(_ status: EngineMessage.HarnessStatus) {
+        if harness != status { harness = status }
+        guard let next = launchAfterHarness else { return }
+        if status.isReady {
+            launchAfterHarness = nil
+            launching = false
+            next()
+        } else if status.status == "failed" {
+            launchAfterHarness = nil
+            launching = false
+            launchError = "Couldn't install October Harness: \(status.message ?? "unknown error")"
+        }
+    }
+
+    /// Starts a task: `prompt` for `agent` (nil: `defaultAgentKind`) in `folder`, with the toolkit
+    /// list, like a Task from New Session. October waits for October Harness to install first when
+    /// needed (`launching` is true meanwhile); other agents start right away. The outcome shows
+    /// the usual way (`launching`, `launchError`, the "Session started" toast). False when no
+    /// agent can start or another session is still starting.
+    @discardableResult
+    func launchTask(prompt: String, agent: AgentKind?, folder: String, background: Bool) -> Bool {
+        guard let kind = agent ?? defaultAgentKind, !launching else { return false }
+        launch(kind: kind, folder: folder, prompt: prompt, toolkit: true, background: background)
+        return true
     }
 
     /// A message (and folder) for New Session to start with, from the assistant's Do.
@@ -412,6 +483,20 @@ final class AppModel: ObservableObject {
         toolkit: Bool = false, taskApp: String? = nil, background: Bool
     ) {
         guard !launching, !pending.values.contains(where: { if case .launch = $0 { return true }; return false }) else { return }
+        // October without October Harness yet: install it first, then launch (the engine's launch
+        // deadline is too short for a first install).
+        if kind == .october, installedKinds != nil, !octoberReady {
+            launching = true
+            launchError = nil
+            launchAfterHarness = { [weak self] in
+                self?.launch(
+                    kind: kind, folder: folder, prompt: prompt, screenshot: screenshot, model: model, context: context, toolkit: toolkit,
+                    taskApp: taskApp, background: background
+                )
+            }
+            if harness?.status != "installing" { engine.prepareHarness() }
+            return
+        }
         if let taskApp {
             var folders = UserDefaults.standard.dictionary(forKey: "taskFolders") as? [String: String] ?? [:]
             folders[taskApp] = folder
@@ -646,6 +731,7 @@ final class AppModel: ObservableObject {
         pendingSince.removeAll()
         overdue.removeAll()
         launching = false
+        launchAfterHarness = nil
         firstSnapshot = true
         agents = []
         closeChat()
