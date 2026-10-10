@@ -123,7 +123,7 @@ Say you have six sessions running in cmux: two Claude Code, two Codex, one OpenC
 | Codex CLI | ✅ | ✅ | ✅ | With hooks: instant "finished" updates |
 | OpenCode | ✅ | ✅ | ✅ | Reads OpenCode's local database |
 | Pi | ✅ | ✅ | ✅ | |
-| October harness (`october`) | ✅ | ✅ | ✅ | October's own agent, built on Pi |
+| October harness (`october`) | ✅ | ✅ | ✅ | October's own agent, built on Pi. Built in: installed on first use when it isn't on your PATH, and the default agent for new sessions |
 | Gemini CLI | ✅ | ✅ | ✅ | |
 | Grok, Cursor Agent, Qwen Code, Goose, Aider, Amp, GitHub Copilot CLI, Kimi, Droid, Crush, Auggie | ✅ | — | — | Shown as *Running*; you can still reply and jump to them |
 
@@ -155,6 +155,7 @@ Lantern is in **beta (v0.4.3)**.
 | Jump to the agent's exact tab | ✅ cmux, Terminal, iTerm2, tmux |
 | Notifications | ✅ Optional |
 | Start new sessions (Terminal window or background) | ✅ Background needs tmux |
+| October Harness built in | ✅ The default agent for new sessions and assistant tasks (changeable; falls back to Claude Code, then Codex, when October can't start). Your own `october` is used when it's on your PATH; otherwise Lantern installs the pinned version on first use (not in the DMG; a few minutes and about 370 MB on disk, less when October Desktop's Node.js can be reused). Signs in with your October account when you're signed in to Lantern. |
 | Dictation, on-device only | ✅ When the Mac supports on-device recognition for your language; otherwise Lantern says so instead of sending audio to Apple |
 | Global shortcut (default ⌃⌥Space, changeable) | ✅ |
 | Welcome guide, Settings, Report a Problem, Uninstall | ✅ |
@@ -182,6 +183,7 @@ Lantern is in **beta (v0.4.3)**.
 
   Never sent: messages, prompts, commands, folder or project names, file paths, agent titles, or anything typed or dictated. PostHog derives an approximate location (country and city) from the IP address the counts arrive from, to show where Lantern is used; it isn't precise and nothing else is used for it. If you sign in to October, your usage is linked to your October account (its id and email). Turning the switch off stops sending and drops anything not yet sent. Builds from source have no PostHog key and send nothing.
 - **October account (optional).** Signing in talks to October's sign-in service (Supabase) and reads your plan from october.dev. The session is kept in the macOS Keychain.
+- **October Harness (downloaded on first use).** When you start an October session (October is the default agent) and `october` isn't installed, Lantern downloads it the first time: Node.js from nodejs.org (checked against a pinned SHA-256; skipped when October Desktop already has a compatible one) and the pinned `@october-dev/october` package from the npm registry, installed without running install scripts into `~/Library/Application Support/October Lantern/` (`runtime/` and `harness/`). If you're signed in to October, October sessions get your current October access token (not the refresh token) so the harness uses your October account; the engine keeps it in memory only, and it's passed to the agent's process environment like October Desktop does. Signed out, the harness asks you to sign in itself.
 - **October Desktop (optional).** Lantern talks to October only on your Mac (127.0.0.1), and only after you allow it in October. You can disconnect it from either app.
 - **October phone app (optional).** Traffic goes through October's relay and is end-to-end encrypted (Noise), so the relay can't read it. Phones are paired by QR and can be revoked from Lantern.
 - **Dictation is on-device only.** Lantern uses Apple's on-device speech recognizer and never sends audio to Apple's servers: if on-device recognition isn't available for your language on this Mac, dictation says so rather than falling back. Lantern listens only while the mic button is on.

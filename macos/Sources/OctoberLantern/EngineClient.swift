@@ -19,6 +19,8 @@ final class EngineClient {
     /// gone in.
     var onReplyResult: ((String, Bool, String?, String?) -> Void)?
     var onInstalled: ((EngineMessage.Installed) -> Void)?
+    /// October Harness's status (with `installed`, and in answer to `prepareHarness`).
+    var onHarness: ((EngineMessage.HarnessStatus) -> Void)?
     var onModels: ((EngineMessage.ModelList) -> Void)?
     var onHistory: ((String, Bool, [ChatMessage]) -> Void)?
     var onOctober: ((OctoberLink) -> Void)?
@@ -180,6 +182,25 @@ final class EngineClient {
         send(["type": "bus.prepare"])
     }
 
+    /// Installs October Harness in the background if `october` isn't on PATH and it isn't here yet
+    /// (answered with `harness`, now and when it's ready or has failed).
+    @discardableResult
+    func prepareHarness() -> Bool {
+        send(["type": "harness.prepare"])
+    }
+
+    /// The October sign-in for October launches (memory only in the engine); nil when signed out.
+    /// Never the refresh token.
+    @discardableResult
+    func octoberSession(accessToken: String?, expiresAt: Date?) -> Bool {
+        var request: [String: Any] = ["type": "october.session"]
+        if let accessToken, let expiresAt {
+            request["accessToken"] = accessToken
+            request["expiresAt"] = Int(expiresAt.timeIntervalSince1970)
+        }
+        return send(request)
+    }
+
     @discardableResult
     func refreshToolkit() -> Bool {
         send(["type": "toolkit.refresh"])
@@ -273,7 +294,10 @@ final class EngineClient {
                 case .hello: break
                 case .snapshot(let agents): onAgents?(agents)
                 case .replyResult(let id, let ok, let error, let message): onReplyResult?(id, ok, error, message)
-                case .installed(let installed): onInstalled?(installed)
+                case .installed(let installed, let harness):
+                    onInstalled?(installed)
+                    if let harness { onHarness?(harness) }
+                case .harness(let status): onHarness?(status)
                 case .models(let list): onModels?(list)
                 case .history(let id, let agentId, let supported, let messages, let busy):
                     if historyRequests.finish(id, for: agentId), !busy { onHistory?(agentId, supported, messages) }
