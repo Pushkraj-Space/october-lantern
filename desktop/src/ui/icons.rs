@@ -29,6 +29,10 @@ pub enum Icon {
     Chat,
     Copy,
     Check,
+    /// SF `checkmark.circle.fill` (Settings hooks).
+    CheckCircle,
+    /// SF `arrow.triangle.2.circlepath` (outdated hooks).
+    Refresh,
     Hourglass,
     Warning,
     Reselect,
@@ -163,6 +167,20 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.line(&[(2.0, 17.0), (12.0, 22.5), (22.0, 17.0)]);
         }
         Dismiss | Check => p.line(&[(4.0, 12.0), (9.0, 17.0), (20.0, 6.0)]),
+        CheckCircle => {
+            p.circle(12.0, 12.0, 10.0, true);
+            Pen { color: Color32::from_gray(30), stroke: Stroke::new(p.stroke.width, Color32::from_gray(30)), ..p }.line(&[
+                (6.0, 12.0),
+                (10.0, 16.0),
+                (18.0, 8.0),
+            ]);
+        }
+        Refresh => {
+            p.arc((12.0, 12.0), 8.0, -2.8, -0.3);
+            p.line(&[(16.0, 6.5), (20.0, 9.5), (22.0, 4.5)]);
+            p.arc((12.0, 12.0), 8.0, 0.35, 2.85);
+            p.line(&[(8.0, 17.5), (4.0, 14.5), (2.0, 19.5)]);
+        }
         ArrowUp => {
             p.line(&[(12.0, 20.0), (12.0, 4.0)]);
             p.line(&[(5.0, 11.0), (12.0, 4.0), (19.0, 11.0)]);
@@ -373,7 +391,17 @@ mod tests {
         let ctx = egui::Context::default();
         for size in [13.0, 15.0, 26.0, 30.0] {
             let rect = Rect::from_min_size(egui::pos2(10.0, 10.0), egui::Vec2::splat(size));
-            for icon in [Icon::Power, Icon::BellBadge, Icon::Bolt, Icon::Keyboard, Icon::ArrowToEdge, Icon::Cursor, Icon::MenuBar] {
+            for icon in [
+                Icon::Power,
+                Icon::BellBadge,
+                Icon::Bolt,
+                Icon::Keyboard,
+                Icon::ArrowToEdge,
+                Icon::Cursor,
+                Icon::MenuBar,
+                Icon::CheckCircle,
+                Icon::Refresh,
+            ] {
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| paint_icon(ui.painter(), rect, icon, Color32::WHITE));
                 output.textures_delta.clear();
                 assert!(!output.shapes.is_empty(), "{icon:?}");

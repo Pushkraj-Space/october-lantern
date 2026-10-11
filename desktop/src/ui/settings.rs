@@ -1,0 +1,744 @@
+//! SettingsView.swift: four tabs in an ordinary dark, fixed-size window. Native Form/TabView
+//! metrics are provisional until compared with Mac settings-0..3 snapshots; not panel glass.
+use super::{
+    Ctx, SettingChange, UiAction, cards, components as c,
+    icons::Icon,
+    theme::{self as t, Weight},
+};
+use crate::model::{AgentKind, Edge, HookState, MESSAGE_HOTKEYS, POINT_ASK_HOTKEYS, Platform, Uninstall};
+use eframe::egui::{self, Align, Color32, Layout, Rect, Sense, Stroke, Ui, vec2};
+
+const SIZE: egui::Vec2 = vec2(520.0, 480.0);
+const BACKGROUND: Color32 = Color32::from_gray(30);
+const GROUP: Color32 = Color32::from_gray(39);
+
+pub fn render(ui: &mut Ui, cx: &mut Ctx) -> f32 {
+    let rect = Rect::from_min_size(ui.cursor().min, SIZE);
+    ui.painter().rect_filled(rect, 0, BACKGROUND);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)), |ui| {
+        ui.set_width(SIZE.x);
+        ui.set_height(SIZE.y);
+        ui.set_clip_rect(ui.clip_rect().intersect(rect));
+        // These are native settings controls, not the app's amber panel controls.
+        ui.visuals_mut().selection.bg_fill = t::LINK;
+        ui.visuals_mut().hyperlink_color = t::LINK;
+        ui.visuals_mut().widgets.active.bg_fill = t::LINK;
+        ui.visuals_mut().widgets.active.bg_stroke = Stroke::new(1.0, t::LINK);
+        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+        tabs(ui, cx);
+        let tab = cx.view.settings_tab.min(3);
+        let mut scroll = egui::ScrollArea::vertical().id_salt(("settings-page", tab)).max_height(424.0).auto_shrink([false, false]);
+        if let Some(offset) = cx.view.settings_scroll.take() {
+            scroll = scroll.vertical_scroll_offset(offset);
+        }
+        scroll.show(ui, |ui| {
+            egui::Frame::new().inner_margin(20).show(ui, |ui| {
+                ui.set_width(480.0);
+                ui.spacing_mut().item_spacing.y = 14.0;
+                match tab {
+                    0 => general(ui, cx),
+                    1 => agents(ui, cx),
+                    2 => october(ui, cx),
+                    _ => about(ui, cx),
+                }
+            });
+        });
+    });
+    confirmation(ui, cx);
+    SIZE.y
+}
+
+fn tabs(ui: &mut Ui, cx: &mut Ctx) {
+    let (row, _) = ui.allocate_exact_size(vec2(520.0, 48.0), Sense::hover());
+    let width = 96.0;
+    for (index, (title, icon)) in
+        [("General", Icon::Settings), ("Agents", Icon::Layers), ("October", Icon::Leaf), ("About", Icon::Info)].into_iter().enumerate()
+    {
+        let rect =
+            Rect::from_min_size(egui::pos2(row.center().x - width * 2.0 + index as f32 * width, row.top() + 10.0), vec2(width, 28.0));
+        let selected = cx.view.settings_tab.min(3) == index;
+        let response = ui.interact(rect, egui::Id::new(("settings-tab", index)), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, title));
+        if selected || response.hovered() {
+            ui.painter().rect_filled(rect, 6, t::white(if selected { 0.14 } else { 0.06 }));
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(rect, 6, Stroke::new(1.0, t::LINK), egui::StrokeKind::Inside);
+        }
+        c::paint_icon(
+            ui.painter(),
+            Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), vec2(14.0, 14.0)),
+            icon,
+            if selected { t::INK } else { t::MUTED },
+        );
+        let galley = ui.painter().layout_no_wrap(title.into(), t::font(12.0, Weight::Medium), if selected { t::INK } else { t::MUTED });
+        ui.painter().galley(egui::pos2(rect.left() + 27.0, rect.center().y - galley.size().y / 2.0), galley, t::INK);
+        if response.clicked() {
+            cx.view.settings_tab = index;
+        }
+    }
+    ui.painter().hline(row.x_range(), row.bottom(), Stroke::new(1.0, t::HAIRLINE));
+}
+
+fn group(ui: &mut Ui, title: Option<&str>, body: impl FnOnce(&mut Ui)) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        if let Some(title) = title {
+            c::label(ui, title, 12.0, Weight::Semibold, t::MUTED);
+        }
+        egui::Frame::new().fill(GROUP).corner_radius(8).inner_margin(12).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 8.0;
+            body(ui);
+        });
+    });
+}
+
+fn caption(ui: &mut Ui, text: &str) {
+    c::label(ui, text, 11.0, Weight::Regular, t::MUTED);
+}
+
+fn toggle(ui: &mut Ui, cx: &mut Ctx, title: &str, current: bool, change: impl FnOnce(bool) -> SettingChange) {
+    if let Some(on) = setting_switch(ui, title, current, None) {
+        cx.emit(UiAction::ChangeSetting(change(on)));
+    }
+}
+
+/// GroupedFormStyle puts labels first and a mini switch at the trailing edge. These
+/// ordinary-control metrics are provisional pending Lantern's native Mac Settings goldens.
+fn setting_switch(ui: &mut Ui, title: &str, current: bool, agent: Option<(&super::Assets, &AgentKind)>) -> Option<bool> {
+    let enabled = ui.is_enabled();
+    let ink = if enabled { t::INK } else { t::opacity(t::INK, 0.45) };
+    let width = ui.available_width();
+    let gap = ui.spacing().item_spacing.x;
+    let logo_width = if agent.is_some() { 18.0 + gap } else { 0.0 };
+    let label = ui.painter().layout(title.into(), t::font(13.0, Weight::Regular), ink, (width - 26.0 - gap - logo_width).max(1.0));
+    // Measure once: wrapped labels, logos and the switch share the same row center.
+    // A zero-height child layout centers text relative to a different baseline.
+    let (row, _) = ui.allocate_exact_size(vec2(width, label.rect.height().max(22.0)), Sense::hover());
+    if let Some((assets, kind)) = agent {
+        let rect = Rect::from_center_size(egui::pos2(row.left() + 9.0, row.center().y), vec2(18.0, 18.0));
+        let mut logo =
+            ui.new_child(egui::UiBuilder::new().id_salt(("settings-logo", title)).max_rect(rect).layout(Layout::top_down(Align::Min)));
+        c::harness_logo(&mut logo, assets, kind, 18.0);
+    }
+    ui.painter().galley(egui::pos2(row.left() + logo_width, row.center().y - label.rect.center().y), label, ink);
+    let response = ui.interact(row, egui::Id::new(("settings-switch", title)), Sense::click());
+    let on = if response.clicked() { !current } else { current };
+    let track = Rect::from_center_size(egui::pos2(row.right() - 13.0, row.center().y), vec2(26.0, 15.0));
+    let fill = if on { t::LINK } else { t::white(0.2) };
+    ui.painter().rect_filled(track, 7.5, if enabled { fill } else { t::opacity(fill, 0.35) });
+    ui.painter().circle_filled(egui::pos2(if on { track.right() - 7.5 } else { track.left() + 7.5 }, track.center().y), 6.0, ink);
+    if response.has_focus() {
+        ui.painter().rect_stroke(track.expand(2.0), 9.5, Stroke::new(1.0, t::LINK), egui::StrokeKind::Inside);
+    }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, on, title));
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_role(egui::accesskit::Role::Switch));
+    response.clicked().then_some(on)
+}
+
+fn picker(ui: &mut Ui, title: &str, current: &str, options: &[&str], label: impl Fn(&str) -> String) -> Option<String> {
+    let mut selected = current.to_owned();
+    ui.horizontal(|ui| {
+        let label_width = ui.available_width() - 170.0 - ui.spacing().item_spacing.x;
+        let label_response = ui
+            .allocate_ui_with_layout(vec2(label_width, 24.0), Layout::left_to_right(Align::Center), |ui| {
+                ui.set_min_width(label_width);
+                c::label(ui, title, 13.0, Weight::Regular, t::INK)
+            })
+            .inner;
+        egui::ComboBox::from_id_salt(title)
+            .width(170.0)
+            .selected_text(c::text(label(current), 12.0, Weight::Regular, t::INK))
+            .show_ui(ui, |ui| {
+                for value in options {
+                    ui.selectable_value(&mut selected, (*value).to_owned(), label(value));
+                }
+            })
+            .response
+            .labelled_by(label_response.id);
+    });
+    (selected != current).then_some(selected)
+}
+
+fn general(ui: &mut Ui, cx: &mut Ctx) {
+    group(ui, None, |ui| {
+        toggle(ui, cx, "Open at login", cx.model.prefs.open_at_login, SettingChange::OpenAtLogin);
+        let edge = if cx.model.prefs.edge == Edge::Left { "left" } else { "right" };
+        if let Some(value) =
+            picker(
+                ui,
+                "Lantern position",
+                edge,
+                &["right", "left"],
+                |value| if value == "left" { "Left edge".into() } else { "Right edge".into() },
+            )
+        {
+            cx.emit(UiAction::ChangeSetting(SettingChange::Edge(if value == "left" { Edge::Left } else { Edge::Right })));
+        }
+        if let Some(value) =
+            picker(ui, "Shortcut to message an agent", &cx.model.prefs.message_hotkey, &MESSAGE_HOTKEYS, crate::model::hotkey_label)
+        {
+            cx.emit(UiAction::ChangeSetting(SettingChange::MessageHotkey(value)));
+        }
+        if let Some(value) =
+            picker(ui, "Point & Ask (hold, point, speak)", &cx.model.prefs.point_ask_hotkey, &POINT_ASK_HOTKEYS, crate::model::hotkey_label)
+        {
+            cx.emit(UiAction::ChangeSetting(SettingChange::PointAskHotkey(value)));
+        }
+        toggle(ui, cx, "Check for updates automatically", cx.model.prefs.automatic_updates, SettingChange::AutomaticUpdates);
+    });
+    group(ui, Some("New sessions and tasks"), |ui| {
+        toggle(
+            ui,
+            cx,
+            "Include a screenshot of my screen when starting a session",
+            cx.model.prefs.screenshot_new_sessions,
+            SettingChange::ScreenshotNewSessions,
+        );
+        caption(
+            ui,
+            "The new agent gets a screenshot of the screen you're on (without Lantern) with its first message, for context. It stays on this computer. Needs screen capture permission; you can also switch it per session.",
+        );
+        toggle(ui, cx, "Connect new sessions to October Bus", cx.model.prefs.bus_for_sessions, SettingChange::BusForSessions);
+        caption(
+            ui,
+            "Agents Lantern starts (Claude Code, Codex, OpenCode, October) can see and message each other and share tasks. Everything stays on this computer.",
+        );
+        toggle(
+            ui,
+            cx,
+            "Also give new sessions the list of tools on this computer",
+            cx.model.prefs.toolkit_in_sessions,
+            SettingChange::ToolkitInSessions,
+        );
+        ui.horizontal(|ui| {
+            let buttons_width = ["Open List", "Refresh"].into_iter().map(|title| {
+                ui.painter().layout_no_wrap(title.into(), t::font(12.0, Weight::Medium), t::INK).size().x
+                    + 2.0 * ui.spacing().button_padding.x + 4.0 // Atom-frame pixel rounding allowance.
+            }).sum::<f32>() + ui.spacing().item_spacing.x;
+            ui.allocate_ui_with_layout(vec2(ui.available_width() - buttons_width - 8.0, 0.0), Layout::top_down(Align::Min), |ui| {
+                caption(ui, "Lantern keeps a short list of what this computer has (tools, apps, local models) for agents it starts. Tasks always get it. You can add your own notes at the end of the list.");
+            });
+            if ui.button("Open List").clicked() {
+                cx.emit(UiAction::OpenToolkit);
+            }
+            if ui.button("Refresh").clicked() {
+                cx.emit(UiAction::RefreshToolkit);
+            }
+        });
+    });
+    group(ui, Some("Exact status from agent hooks"), |ui| hooks(ui, cx));
+    group(ui, Some("Notifications"), |ui| {
+        toggle(ui, cx, "Notify me when an agent needs me", cx.model.prefs.notifications, SettingChange::NotificationsEnabled);
+        if cx.model.prefs.notifications && cx.model.system.notifications_allowed == Some(false) {
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                c::paint_icon(ui.painter(), rect, Icon::Warning, t::AMBER);
+                c::label(ui, "Off in System Settings", 12.0, Weight::Medium, t::AMBER);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Open System Settings…").clicked() {
+                        cx.emit(UiAction::OpenNotificationSettings);
+                    }
+                });
+            });
+            caption(
+                ui,
+                "Your desktop is blocking Lantern's notifications. Allow them for October Lantern in your system's notification settings.",
+            );
+        }
+        ui.add_enabled_ui(cx.model.prefs.notifications, |ui| {
+            toggle(ui, cx, "Also when an agent finishes its turn", cx.model.prefs.notify_finished, SettingChange::NotifyOnFinish)
+        });
+        caption(
+            ui,
+            "Questions and permission prompts always notify (when notifications are on). Notifications are skipped for agents you've muted in Agents.",
+        );
+        if cx.model.system.notifications_allowed != Some(false) && ui.button("Open Notification Settings…").clicked() {
+            cx.emit(UiAction::OpenNotificationSettings);
+        }
+    });
+}
+
+fn hooks(ui: &mut Ui, cx: &mut Ctx) {
+    let mut any = false;
+    let mut installed = true;
+    let mut outdated = false;
+    for (kind, title) in [("claude", "Claude Code"), ("codex", "Codex")] {
+        let state = cx.model.system.hooks.get(kind).copied().unwrap_or_default();
+        any |= state != HookState::Off;
+        installed &= state == HookState::On;
+        outdated |= state == HookState::NeedsUpdate;
+        ui.horizontal(|ui| {
+            c::label(ui, title, 13.0, Weight::Regular, t::INK);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let (label, color, icon) = match state {
+                    HookState::On => ("On", t::GREEN, Some(Icon::CheckCircle)),
+                    HookState::NeedsUpdate => ("Needs update", t::AMBER, Some(Icon::Refresh)),
+                    HookState::Off => ("Off", t::MUTED, None),
+                };
+                c::label(ui, label, 12.0, Weight::Regular, color);
+                if let Some(icon) = icon {
+                    let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                    c::paint_icon(ui.painter(), rect, icon, color);
+                }
+            });
+        });
+    }
+    ui.horizontal(|ui| {
+        if cx.model.system.hooks_busy {
+            c::spinner(ui, 12.0, t::MUTED, cx.env);
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_enabled_ui(!cx.model.system.hooks_busy, |ui| {
+                if !installed
+                    && ui
+                        .button(if outdated {
+                            "Update"
+                        } else if any {
+                            "Turn On for Both"
+                        } else {
+                            "Turn On"
+                        })
+                        .clicked()
+                {
+                    cx.emit(UiAction::SetHooks { enabled: true });
+                }
+                if any && ui.button("Turn Off").clicked() {
+                    cx.emit(UiAction::SetHooks { enabled: false });
+                }
+            });
+        });
+    });
+    if let Some(error) = &cx.model.system.hooks_error {
+        ui.horizontal_top(|ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            c::paint_icon(ui.painter(), rect, Icon::Warning, t::AMBER);
+            c::label(ui, error, 11.0, Weight::Regular, t::AMBER);
+        });
+    }
+    caption(
+        ui,
+        "Claude Code and Codex tell Lantern the moment they finish or need permission. Lantern backs up ~/.claude/settings.json and ~/.codex/config.toml before changing them, and restores them when you turn this off. Restart running agents afterwards.",
+    );
+}
+
+fn agents(ui: &mut Ui, cx: &mut Ctx) {
+    group(ui, Some("Count in Waiting and notify"), |ui| {
+        for kind in [
+            "claude", "codex", "opencode", "pi", "october", "gemini", "grok", "cursor", "qwen", "goose", "aider", "amp", "copilot", "kimi",
+            "droid", "crush", "auggie",
+        ] {
+            let kind = AgentKind::new(kind);
+            if let Some(counts) = setting_switch(ui, &kind.display_name(), cx.model.prefs.counts(&kind), Some((cx.assets, &kind))) {
+                cx.emit(UiAction::ChangeSetting(SettingChange::AgentMuted { kind: kind.clone(), muted: !counts }));
+            }
+        }
+    });
+    caption(ui, "Turned-off agents still appear in the Agents list.");
+}
+
+fn october(ui: &mut Ui, cx: &mut Ctx) {
+    ui.painter().rect_filled(ui.max_rect().expand(20.0), 0, Color32::from_gray(28));
+    c::label(
+        ui,
+        "Lantern works on its own. Signing in to October adds Ask and Point & Ask answers; October Desktop shows its agents here.",
+        12.0,
+        Weight::Regular,
+        t::MUTED,
+    );
+    cards::account::render(ui, cx);
+    cards::desktop::render(ui, cx, false);
+}
+
+fn about(ui: &mut Ui, cx: &mut Ctx) {
+    group(ui, None, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 14.0;
+            ui.add(egui::Image::new(&cx.assets.logo).fit_to_exact_size(vec2(52.0, 52.0)));
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                c::label(ui, "October Lantern", 17.0, Weight::Bold, t::INK);
+                c::label(ui, format!("Version {}", cx.model.system.version), 13.0, Weight::Regular, t::MUTED);
+            });
+        });
+        let newer = cx.model.system.update.as_ref().is_some_and(|update| update.newer);
+        let title = if cx.model.system.checking_updates {
+            "Checking…"
+        } else if newer {
+            "Install Update…"
+        } else {
+            "Check for Updates…"
+        };
+        if ui.add_enabled(!cx.model.system.checking_updates, egui::Button::new(title)).clicked() {
+            cx.emit(UiAction::CheckUpdates);
+        }
+        if let Some(update) = &cx.model.system.update {
+            caption(ui, &if update.newer { format!("Version {} is available.", update.version) } else { "You're up to date.".into() });
+        }
+    });
+    // No analytics transport exists: equivalent to Swift Analytics.available == false.
+    group(ui, Some("Help"), |ui| {
+        if ui.button("Report a Problem…").clicked() {
+            cx.emit(UiAction::ReportProblem);
+        }
+        if ui.button("Show Welcome Guide").clicked() {
+            cx.emit(UiAction::ShowWelcome);
+        }
+        if ui.link("lantern.october.dev").clicked() {
+            cx.emit(UiAction::OpenUrl("https://lantern.october.dev".into()));
+        }
+        if ui.link("hey@october.dev").clicked() {
+            cx.emit(UiAction::OpenUrl("mailto:hey@october.dev".into()));
+        }
+    });
+    group(ui, None, |ui| {
+        if ui.button(c::text("Uninstall October Lantern…", 13.0, Weight::Regular, t::RED)).clicked() {
+            cx.view.settings_uninstall = true;
+        }
+        caption(
+            ui,
+            &format!(
+                "Signs out of October, removes the hooks (restoring your agents' settings), support files and settings, then {}.",
+                removal(cx)
+            ),
+        );
+    });
+}
+
+fn removal(cx: &Ctx) -> &'static str {
+    if cx.model.caps.platform == Platform::Windows { "removes the app" } else { "moves the app to the Trash" }
+}
+
+fn confirmation(ui: &mut Ui, cx: &mut Ctx) {
+    if cx.model.system.uninstall != Uninstall::Idle {
+        cx.view.settings_uninstall = false;
+        uninstall_status(ui, cx);
+        return;
+    }
+    if !cx.view.settings_uninstall {
+        return;
+    }
+    let response = egui::Modal::new(ui.id().with("settings-uninstall")).show(ui.ctx(), |ui| {
+        ui.set_width(380.0);
+        c::label(ui, "Uninstall October Lantern?", 16.0, Weight::Semibold, t::INK);
+        c::label(ui, format!("This signs out of October, removes Lantern's hooks from Claude Code and Codex (restoring your previous settings), its support files and its settings, then {}. Your agents and any sessions Lantern started keep running.", removal(cx)), 12.0, Weight::Regular, t::MUTED);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.button("Cancel").clicked() { cx.view.settings_uninstall = false; }
+            if ui.button(c::text("Uninstall", 12.0, Weight::Semibold, t::RED)).clicked() { cx.view.settings_uninstall = false; cx.emit(UiAction::ConfirmUninstall); }
+        });
+    });
+    if response.should_close() {
+        cx.view.settings_uninstall = false;
+    }
+}
+
+fn uninstall_status(ui: &mut Ui, cx: &mut Ctx) {
+    let mut dismiss = false;
+    let response = egui::Modal::new(ui.id().with("settings-uninstall-status")).show(ui.ctx(), |ui| {
+        ui.set_width(380.0);
+        match &cx.model.system.uninstall {
+            Uninstall::Idle => {}
+            Uninstall::Removing => {
+                c::label(ui, "Uninstalling October Lantern…", 16.0, Weight::Semibold, t::INK);
+                ui.horizontal(|ui| {
+                    c::spinner(ui, 12.0, t::MUTED, cx.env);
+                    c::label(ui, "Signing out and removing Lantern's hooks, files and settings…", 12.0, Weight::Regular, t::MUTED);
+                });
+                caption(ui, "Your agents and running sessions are left alone.");
+            }
+            Uninstall::Partial { failures } => {
+                c::label(ui, "Some of Lantern couldn't be removed", 16.0, Weight::Semibold, t::INK);
+                egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                    c::label(ui, failures.join("\n\n"), 12.0, Weight::Regular, t::MUTED);
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Keep the App").clicked() {
+                        dismiss = true;
+                    }
+                    let title = if cx.model.caps.platform == Platform::Windows { "Remove App Anyway" } else { "Move App to Trash Anyway" };
+                    if ui.button(title).clicked() {
+                        cx.emit(UiAction::RemoveAppAnyway);
+                    }
+                });
+            }
+            Uninstall::AppFailed { message } => {
+                let title = if cx.model.caps.platform == Platform::Windows {
+                    "Couldn't remove the app"
+                } else {
+                    "Couldn't move the app to the Trash"
+                };
+                c::label(ui, title, 16.0, Weight::Semibold, t::INK);
+                egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                    c::label(ui, message, 12.0, Weight::Regular, t::MUTED);
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("OK").clicked() {
+                        dismiss = true;
+                    }
+                });
+            }
+        }
+    });
+    // Closing a failure alert keeps the app. Cleanup already in flight cannot be cancelled
+    // merely by clicking the backdrop or pressing Escape.
+    if cx.model.system.uninstall != Uninstall::Removing && (dismiss || response.should_close()) {
+        cx.emit(UiAction::DismissUninstall);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        app::fixture::Fixture,
+        model::{Inputs, Model},
+        ui::{Assets, Env, UiState},
+    };
+
+    struct Screen {
+        ctx: egui::Context,
+        assets: Assets,
+        model: Model,
+        inputs: Inputs,
+        view: UiState,
+    }
+
+    impl Screen {
+        fn new(tab: usize) -> Self {
+            let ctx = egui::Context::default();
+            t::install(&ctx);
+            let assets = Assets::load(&ctx);
+            Self {
+                ctx,
+                assets,
+                model: Model::default(),
+                inputs: Inputs::default(),
+                view: UiState { settings_tab: tab, ..Default::default() },
+            }
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) -> (Vec<UiAction>, egui::FullOutput) {
+            let mut actions = Vec::new();
+            let mut width = 0.0;
+            let mut output = self.ctx.run_ui(
+                egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, SIZE)), events, ..Default::default() },
+                |ui| {
+                    let mut cx = Ctx {
+                        model: &self.model,
+                        inputs: &mut self.inputs,
+                        view: &mut self.view,
+                        out: &mut actions,
+                        assets: &self.assets,
+                        env: &Env::default(),
+                    };
+                    assert_eq!(super::super::render_settings(ui, &mut cx), 480.0);
+                    width = ui.min_rect().width();
+                },
+            );
+            output.textures_delta.clear();
+            assert!(width <= 520.5, "settings width {width}; texts {:?}", texts(&output));
+            (actions, output)
+        }
+
+        fn click(&mut self, title: &str) -> Vec<UiAction> {
+            // A newly opened popup has one sizing frame before its settled position.
+            self.frame(Vec::new());
+            let (_, output) = self.frame(Vec::new());
+            let texts = texts(&output);
+            let pos = texts.iter().find(|(text, _)| text == title).unwrap_or_else(|| panic!("missing {title}: {texts:?}")).1.center();
+            let mut actions = Vec::new();
+            for pressed in [true, false] {
+                actions.extend(
+                    self.frame(vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+                    ])
+                    .0,
+                );
+            }
+            actions
+        }
+    }
+
+    fn texts(output: &egui::FullOutput) -> Vec<(String, Rect)> {
+        fn collect(shape: &egui::Shape, clip: Rect, out: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                    if clip.contains(rect.center()) {
+                        out.push((text.galley.job.text.clone(), rect));
+                    }
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, clip, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, shape.clip_rect, &mut out);
+        }
+        out
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }
+    }
+
+    #[test]
+    fn tabs_keep_the_four_source_surfaces_and_keyboard_activation() {
+        let mut screen = Screen::new(0);
+        for (index, title, content) in [
+            (0, "General", "Open at login"),
+            (1, "Agents", "Count in Waiting and notify"),
+            (2, "October", "Connect to October"),
+            (3, "About", "October Lantern"),
+        ] {
+            assert!(screen.click(title).is_empty());
+            assert_eq!(screen.view.settings_tab, index);
+            assert!(texts(&screen.frame(Vec::new()).1).iter().any(|(text, _)| text == content));
+        }
+        screen.ctx.memory_mut(|memory| memory.request_focus(egui::Id::new(("settings-tab", 0usize))));
+        screen.frame(vec![key(egui::Key::Space)]);
+        assert_eq!(screen.view.settings_tab, 0);
+        screen.frame(vec![key(egui::Key::Tab)]);
+        screen.frame(vec![key(egui::Key::Space)]);
+        assert_eq!(screen.view.settings_tab, 1);
+    }
+
+    #[test]
+    fn preferences_emit_intents_without_mutating_the_domain() {
+        let mut screen = Screen::new(0);
+        let prefs = screen.model.prefs.clone();
+        assert_eq!(screen.click("Open at login"), vec![UiAction::ChangeSetting(SettingChange::OpenAtLogin(!prefs.open_at_login))]);
+        assert_eq!(screen.model.prefs, prefs);
+        screen.ctx.memory_mut(|memory| memory.request_focus(egui::Id::new(("settings-switch", "Open at login"))));
+        assert_eq!(
+            screen.frame(vec![key(egui::Key::Space)]).0,
+            vec![UiAction::ChangeSetting(SettingChange::OpenAtLogin(!prefs.open_at_login))]
+        );
+        screen.click("Right edge");
+        assert_eq!(screen.click("Left edge"), vec![UiAction::ChangeSetting(SettingChange::Edge(Edge::Left))]);
+        screen.view.settings_tab = 1;
+        assert_eq!(
+            screen.click("Claude Code"),
+            vec![UiAction::ChangeSetting(SettingChange::AgentMuted { kind: AgentKind::new("claude"), muted: true })]
+        );
+        assert_eq!(screen.model.prefs, prefs);
+    }
+
+    #[test]
+    fn hooks_and_disabled_notifications_respect_busy_and_enabled_states() {
+        let mut screen = Screen::new(0);
+        screen.view.settings_scroll = Some(570.0);
+        assert_eq!(screen.click("Turn On"), vec![UiAction::SetHooks { enabled: true }]);
+        screen.model.system.hooks_busy = true;
+        assert!(screen.click("Turn On").is_empty());
+        screen.model.prefs.notifications = false;
+        screen.view.settings_scroll = Some(1500.0);
+        assert!(screen.click("Also when an agent finishes its turn").is_empty());
+        screen.model.prefs.notifications = true;
+        assert_eq!(
+            screen.click("Also when an agent finishes its turn"),
+            vec![UiAction::ChangeSetting(SettingChange::NotifyOnFinish(false))]
+        );
+    }
+
+    #[test]
+    fn uninstall_requires_explicit_confirmation_and_escape_cancels() {
+        let mut screen = Screen::new(3);
+        assert!(screen.click("Uninstall October Lantern…").is_empty());
+        assert!(screen.view.settings_uninstall);
+        assert!(screen.frame(vec![key(egui::Key::Enter)]).0.is_empty(), "Return must not implicitly remove the app");
+        assert!(screen.frame(vec![key(egui::Key::Escape)]).0.is_empty());
+        assert!(!screen.view.settings_uninstall);
+        screen.click("Uninstall October Lantern…");
+        assert!(screen.click("Cancel").is_empty());
+        assert!(!screen.view.settings_uninstall);
+        screen.click("Uninstall October Lantern…");
+        assert_eq!(screen.click("Uninstall"), vec![UiAction::ConfirmUninstall]);
+        assert!(!screen.view.settings_uninstall);
+    }
+
+    #[test]
+    fn update_button_discloses_installing_and_is_disabled_while_checking() {
+        let mut screen = Screen::new(3);
+        assert_eq!(screen.click("Check for Updates…"), vec![UiAction::CheckUpdates]);
+        screen.model.system.update = Some(crate::model::UpdateInfo { version: "0.8.3".into(), newer: true });
+        assert_eq!(screen.click("Install Update…"), vec![UiAction::CheckUpdates]);
+        screen.model.system.checking_updates = true;
+        assert!(screen.click("Checking…").is_empty());
+    }
+
+    #[test]
+    fn partial_cleanup_needs_a_second_explicit_remove_intent_and_progress_is_not_cancellable() {
+        let mut screen = Screen::new(3);
+        screen.model.system.uninstall =
+            Uninstall::Partial { failures: vec!["Hooks could not be restored. Restore the saved backup manually.".into()] };
+        assert!(screen.frame(vec![key(egui::Key::Enter)]).0.is_empty());
+        assert_eq!(screen.click("Keep the App"), vec![UiAction::DismissUninstall]);
+        assert_eq!(screen.click("Move App to Trash Anyway"), vec![UiAction::RemoveAppAnyway]);
+        screen.model.caps.platform = Platform::Windows;
+        assert_eq!(screen.click("Remove App Anyway"), vec![UiAction::RemoveAppAnyway]);
+        screen.model.system.uninstall = Uninstall::Removing;
+        assert!(screen.frame(vec![key(egui::Key::Escape)]).0.is_empty());
+        assert!(texts(&screen.frame(Vec::new()).1).iter().any(|(text, _)| text == "Uninstalling October Lantern…"));
+        screen.model.system.uninstall = Uninstall::AppFailed { message: "Development builds are left in place.".into() };
+        assert_eq!(screen.click("OK"), vec![UiAction::DismissUninstall]);
+    }
+
+    #[test]
+    fn source_tabs_and_agent_switches_have_accessible_names() {
+        let mut screen = Screen::new(1);
+        screen.ctx.enable_accesskit();
+        let tree = screen.frame(Vec::new()).1.platform_output.accesskit_update.unwrap();
+        for label in ["General", "Agents", "October", "About", "Claude Code", "Codex", "OpenCode"] {
+            assert!(tree.nodes.iter().any(|(_, node)| node.label() == Some(label)), "missing accessible control {label}");
+        }
+        assert!(tree.nodes.iter().any(|(_, node)| node.label() == Some("Claude Code") && node.role() == egui::accesskit::Role::Switch));
+        let row = screen.ctx.read_response(egui::Id::new(("settings-switch", "Claude Code"))).unwrap().rect;
+        let label = texts(&screen.frame(Vec::new()).1).into_iter().find(|(text, _)| text == "Claude Code").unwrap().1;
+        assert!(label.left() < row.center().x && label.right() < row.right() - 34.0, "label leads the trailing switch");
+        assert!((label.center().y - row.center().y).abs() <= 0.5, "agent label and switch share a center: {label:?}, {row:?}");
+        screen.view.settings_tab = 0;
+        let output = screen.frame(Vec::new()).1;
+        let row = screen.ctx.read_response(egui::Id::new(("settings-switch", "Open at login"))).unwrap().rect;
+        let label = texts(&output).into_iter().find(|(text, _)| text == "Open at login").unwrap().1;
+        assert!((label.center().y - row.center().y).abs() <= 0.5, "general label and switch share a center: {label:?}, {row:?}");
+    }
+
+    #[test]
+    fn settings_fixtures_use_the_real_fixed_window_without_horizontal_overflow() {
+        for raw in [
+            include_str!("../../fixtures/settings-general.json"),
+            include_str!("../../fixtures/settings-hooks.json"),
+            include_str!("../../fixtures/settings-hooks-busy.json"),
+            include_str!("../../fixtures/settings-notifications.json"),
+            include_str!("../../fixtures/settings-notifications-off.json"),
+            include_str!("../../fixtures/settings-agents.json"),
+            include_str!("../../fixtures/settings-agents-bottom.json"),
+            include_str!("../../fixtures/settings-october.json"),
+            include_str!("../../fixtures/settings-october-connected.json"),
+            include_str!("../../fixtures/settings-about.json"),
+            include_str!("../../fixtures/settings-update.json"),
+            include_str!("../../fixtures/settings-checking.json"),
+            include_str!("../../fixtures/settings-uninstall.json"),
+            include_str!("../../fixtures/settings-uninstall-removing.json"),
+            include_str!("../../fixtures/settings-uninstall-partial.json"),
+            include_str!("../../fixtures/settings-uninstall-failed.json"),
+        ] {
+            let fixture: Fixture = serde_json::from_str(raw).unwrap();
+            let mut screen = Screen::new(0);
+            screen.model = fixture.model;
+            screen.view = fixture.view;
+            screen.inputs = fixture.inputs;
+            for _ in 0..3 {
+                let (actions, output) = screen.frame(Vec::new());
+                assert!(actions.is_empty(), "render-only fixtures must never cause side effects");
+                for (text, rect) in texts(&output) {
+                    assert!(rect.right() <= 520.5 && rect.left() >= -0.5, "horizontal overflow {text}: {rect:?}");
+                }
+            }
+        }
+    }
+}

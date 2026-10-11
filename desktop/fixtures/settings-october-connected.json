@@ -1,0 +1,36 @@
+{
+  "surface": "settings",
+  "nowMs": 1790000000000,
+  "home": "/home/me",
+  "reduceMotion": true,
+  "model": {
+    "system": {
+      "version": "0.8.2",
+      "hooks": {
+        "claude": "on",
+        "codex": "on"
+      },
+      "notifications_allowed": true
+    },
+    "caps": {
+      "platform": "linux",
+      "edge_pill": true,
+      "tray": true,
+      "global_hotkeys": true
+    },
+    "account": {
+      "signed_in": {
+        "email": "a.long.email.address@example.com",
+        "plan": "pro"
+      }
+    },
+    "october": {
+      "status": "connected",
+      "paired": true,
+      "agentCount": 2
+    }
+  },
+  "view": {
+    "settings_tab": 2
+  }
+}

@@ -16,6 +16,7 @@ mod markdown;
 mod october;
 mod point_ask;
 mod sessions;
+mod settings;
 pub mod theme;
 mod welcome;
 
@@ -46,6 +47,9 @@ pub struct UiState {
     pub expanded_bubbles: std::collections::HashSet<String>,
     pub welcome_step: usize,
     pub settings_tab: usize,
+    pub settings_uninstall: bool,
+    /// Initial scroll position for deterministic Settings fixtures; normal windows leave it unset.
+    pub settings_scroll: Option<f32>,
     #[serde(skip)]
     pub composer_focus: Option<(String, u64)>,
     pub searching_models: bool,
@@ -331,7 +335,7 @@ pub fn render_welcome(ui: &mut egui::Ui, cx: &mut Ctx) -> f32 {
 
 /// Settings, 520 x 480.
 pub fn render_settings(ui: &mut egui::Ui, cx: &mut Ctx) -> f32 {
-    placeholder(ui, cx, 480.0, "Settings")
+    settings::render(ui, cx)
 }
 
 fn placeholder(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32, title: &str) -> f32 {

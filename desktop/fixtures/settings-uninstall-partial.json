@@ -1,0 +1,26 @@
+{
+  "surface": "settings",
+  "nowMs": 1790000000000,
+  "home": "/home/me",
+  "reduceMotion": true,
+  "model": {
+    "system": {
+      "version": "0.8.2",
+      "uninstall": {
+        "state": "partial",
+        "failures": [
+          "Claude Code hooks couldn't be restored: ~/.claude/settings.json is not writable. Restore the saved backup after fixing its permissions.",
+          "Login integration couldn't be removed. Remove October Lantern from Startup Applications."
+        ]
+      }
+    },
+    "caps": {
+      "platform": "linux",
+      "edge_pill": true,
+      "tray": true
+    }
+  },
+  "view": {
+    "settings_tab": 3
+  }
+}
