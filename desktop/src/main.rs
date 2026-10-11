@@ -975,13 +975,17 @@ fn main() -> anyhow::Result<()> {
     }
     if args.iter().any(|arg| arg == "--shell") {
         let settings = Settings::load().unwrap_or_default();
-        let start = if args.iter().any(|arg| arg == "--new-session") {
-            Some(ui::UiAction::StartNewSession)
+        let (start, action) = if args.iter().any(|arg| arg == "--new-session") {
+            (Some(ui::UiAction::StartNewSession), "new")
         } else if args.iter().any(|arg| arg == "--point-ask") {
-            Some(ui::UiAction::StartPointAsk)
+            (Some(ui::UiAction::StartPointAsk), "capture")
         } else {
-            None
+            (None, "show")
         };
+        // One Lantern: a second launch hands its request to the running one.
+        if os::show_existing(action) {
+            return Ok(());
+        }
         return app::run(&settings.terminal, start);
     }
     if args.iter().any(|arg| arg == "--help") {

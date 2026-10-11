@@ -81,6 +81,43 @@ pub enum Event {
         text: Result<String, String>,
     },
 }
+/// The tray's menu, as the app wants it: `(label, activation id)`, `None` for a separator. Labels
+/// change with the app (counts), so trays re-read it when its version changes.
+static TRAY_MENU: std::sync::RwLock<Vec<Option<(String, String)>>> = std::sync::RwLock::new(Vec::new());
+static TRAY_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn set_tray_menu(items: Vec<Option<(String, String)>>) {
+    let mut menu = TRAY_MENU.write().unwrap_or_else(|e| e.into_inner());
+    if *menu != items {
+        *menu = items;
+        TRAY_VERSION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+pub fn tray_menu() -> Vec<Option<(String, String)>> {
+    let menu = TRAY_MENU.read().unwrap_or_else(|e| e.into_inner()).clone();
+    if !menu.is_empty() {
+        return menu;
+    }
+    // The legacy window's own menu.
+    vec![
+        Some(("Show Lantern".into(), "show".into())),
+        Some(("Compact lantern".into(), "compact".into())),
+        None,
+        Some(("Quit".into(), "quit".into())),
+    ]
+}
+pub fn tray_menu_version() -> u64 {
+    TRAY_VERSION.load(std::sync::atomic::Ordering::SeqCst)
+}
+/// What choosing a tray item means.
+pub fn tray_event(id: &str) -> Event {
+    match id {
+        "quit" => Event::Quit,
+        "compact" => Event::Compact,
+        other => Event::Activate(other.into()),
+    }
+}
+
 // Wake/map the native window before waiting for another frame. A hidden Wayland window may
 // receive no frame callbacks; a repaint request alone cannot reliably activate it from the tray.
 pub fn event_pump(wake: impl Fn(bool) + Send + 'static) -> (Sender<Event>, mpsc::Receiver<Event>) {

@@ -62,6 +62,9 @@ pub struct Windows {
     pub dialogs: super::dialogs::State,
     /// Expand the pill for a few seconds (after Welcome), on the next frame.
     flash: bool,
+    /// Hidden from the tray ("Hide Lantern"), and whether the window has been told.
+    hidden: bool,
+    hidden_sent: bool,
 }
 
 impl Windows {
@@ -73,6 +76,12 @@ impl Windows {
     }
     pub fn flash(&mut self) {
         self.flash = true;
+    }
+    pub fn pill_hidden(&self) -> bool {
+        self.hidden
+    }
+    pub fn show_pill(&mut self, visible: bool) {
+        self.hidden = !visible;
     }
     /// The pill's window, in points, once placed.
     pub fn pill_rect(&self) -> Option<Rect> {
@@ -161,6 +170,17 @@ impl Lantern {
         }
         if let Some(text) = w.clipboard.take() {
             ctx.copy_text(text);
+        }
+        // Hide / Show Lantern. A window shown again is a new map: its window-manager state
+        // (above, every workspace, no taskbar) and position are given again.
+        if w.hidden != w.hidden_sent {
+            w.hidden_sent = w.hidden;
+            ctx.send_viewport_cmd(ViewportCommand::Visible(!w.hidden));
+            if !w.hidden {
+                w.pill_adopted = false;
+                w.pill_at = None;
+                w.pill_size = None;
+            }
         }
         if w.quitting {
             ctx.send_viewport_cmd(ViewportCommand::Close);

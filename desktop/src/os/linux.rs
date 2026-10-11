@@ -200,8 +200,11 @@ pub fn shortcuts(tx: Sender<Event>) {
             let id = token();
             let bindings = vec![
                 (
-                    "show",
-                    Options::from([("description".into(), text("Show October Lantern")), ("preferred_trigger".into(), text("CTRL+ALT+l"))]),
+                    "compose",
+                    Options::from([
+                        ("description".into(), text("Lantern: Message an agent")),
+                        ("preferred_trigger".into(), text("CTRL+ALT+space")),
+                    ]),
                 ),
                 (
                     "capture",
@@ -304,33 +307,20 @@ impl ksni::Tray for LanternTray {
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::StandardItem;
-        vec![
-            StandardItem {
-                label: "Show Lantern".into(),
-                activate: Box::new(|tray: &mut Self| {
-                    let _ = tray.tx.send(Event::Activate("show".into()));
-                }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: "Compact lantern".into(),
-                activate: Box::new(|tray: &mut Self| {
-                    let _ = tray.tx.send(Event::Compact);
-                }),
-                ..Default::default()
-            }
-            .into(),
-            ksni::MenuItem::Separator,
-            StandardItem {
-                label: "Quit".into(),
-                activate: Box::new(|tray: &mut Self| {
-                    let _ = tray.tx.send(Event::Quit);
-                }),
-                ..Default::default()
-            }
-            .into(),
-        ]
+        super::tray_menu()
+            .into_iter()
+            .map(|item| match item {
+                None => ksni::MenuItem::Separator,
+                Some((label, id)) => StandardItem {
+                    label,
+                    activate: Box::new(move |tray: &mut Self| {
+                        let _ = tray.tx.send(super::tray_event(&id));
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            })
+            .collect()
     }
 }
 fn tray_host() -> bool {
@@ -346,6 +336,7 @@ pub fn tray(tx: Sender<Event>) {
         use ksni::blocking::TrayMethods;
         let mut handle: Option<ksni::blocking::Handle<LanternTray>> = None;
         let mut last = None;
+        let mut shown = 0;
         loop {
             if handle.as_ref().is_some_and(|handle| handle.is_closed()) {
                 handle = None;
@@ -361,7 +352,16 @@ pub fn tray(tx: Sender<Event>) {
                 }
                 last = Some(available);
             }
-            std::thread::sleep(Duration::from_secs(10));
+            // Refresh the menu when the app changes it (counts); look for a tray host every 10 s.
+            for _ in 0..10 {
+                if let Some(handle) = &handle
+                    && shown != super::tray_menu_version()
+                {
+                    shown = super::tray_menu_version();
+                    handle.update(|_| {});
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
         }
     });
 }

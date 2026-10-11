@@ -95,6 +95,20 @@ impl Lantern {
             UiAction::CloseLaunchPreview => self.close_preview(),
             UiAction::RetryPreviewInTerminal => self.retry_preview_in_terminal(),
             UiAction::OpenUrl(url) => self.open_url(&url),
+            UiAction::ReportProblem => {
+                let mut url = url::Url::parse("https://github.com/Pushkraj-Space/october-lantern/issues/new").expect("issue URL");
+                let system = crate::updates::system_name();
+                url.query_pairs_mut().append_pair("title", &format!("{system}: ")).append_pair(
+                    "body",
+                    &format!(
+                        "Lantern: {}\nOS: {system} {}\nDesktop: {}\n\nWhat happened:\n\nSteps to reproduce:\n",
+                        env!("CARGO_PKG_VERSION"),
+                        std::env::consts::ARCH,
+                        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()
+                    ),
+                );
+                self.open_url(url.as_str());
+            }
             UiAction::Copy(text) => self.windows.copy(text),
             UiAction::Quit => self.windows.quit(),
             // TODO(apollo): the remaining actions land with their surfaces (new session, assistant,

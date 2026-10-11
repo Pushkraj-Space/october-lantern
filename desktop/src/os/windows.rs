@@ -338,10 +338,10 @@ struct Shell {
 /// Messages the hidden window gets: commands waiting, and tray icon events.
 const WM_SHELL_COMMAND: u32 = WM_APP + 1;
 const WM_TRAY: u32 = WM_APP + 2;
-const HOTKEY_SHOW: i32 = 1;
-const MENU_SHOW: usize = 1;
-const MENU_COMPACT: usize = 2;
-const MENU_QUIT: usize = 3;
+/// The Mac's default shortcuts: Ctrl+Alt+Space messages an agent (Ask Lantern), Ctrl+Alt+P is
+/// Point & Ask.
+const HOTKEY_COMPOSE: i32 = 1;
+const HOTKEY_CAPTURE: i32 = 2;
 
 struct ShellState {
     tx: Sender<Event>,
@@ -459,10 +459,14 @@ fn run_command(hwnd: HWND, state: &mut ShellState, command: ShellCommand) {
             let _ = state.tx.send(Event::Tray(state.tray));
         }
         ShellCommand::Shortcuts => {
-            let ok = unsafe { RegisterHotKey(hwnd, HOTKEY_SHOW, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, u32::from(b'L')) } != 0;
-            let _ = state.tx.send(Event::Shortcuts(ok));
-            if !ok {
-                let _ = state.tx.send(Event::Status("Shortcuts: Ctrl+Alt+L is taken by another app".into()));
+            let modifiers = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
+            let compose = unsafe { RegisterHotKey(hwnd, HOTKEY_COMPOSE, modifiers, u32::from(b' ')) } != 0;
+            let capture = unsafe { RegisterHotKey(hwnd, HOTKEY_CAPTURE, modifiers, u32::from(b'P')) } != 0;
+            let _ = state.tx.send(Event::Shortcuts(compose || capture));
+            for (ok, keys) in [(compose, "Ctrl+Alt+Space"), (capture, "Ctrl+Alt+P")] {
+                if !ok {
+                    let _ = state.tx.send(Event::Status(format!("Shortcuts: {keys} is taken by another app")));
+                }
             }
         }
         ShellCommand::Notify { agent, title, body } => {
@@ -486,13 +490,16 @@ fn run_command(hwnd: HWND, state: &mut ShellState, command: ShellCommand) {
 }
 
 fn tray_menu(hwnd: HWND, tx: &Sender<Event>) {
+    let items = super::tray_menu();
     unsafe {
         let menu = CreatePopupMenu();
-        for (id, label) in [(MENU_SHOW, "Show Lantern"), (MENU_COMPACT, "Compact lantern")] {
-            AppendMenuW(menu, MF_STRING, id, wide(label).as_ptr());
+        // Menu ids are the item's position + 1 (0 means nothing was chosen).
+        for (index, item) in items.iter().enumerate() {
+            match item {
+                Some((label, _)) => AppendMenuW(menu, MF_STRING, index + 1, wide(label).as_ptr()),
+                None => AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null()),
+            };
         }
-        AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-        AppendMenuW(menu, MF_STRING, MENU_QUIT, wide("Quit").as_ptr());
         let mut at = POINT { x: 0, y: 0 };
         GetCursorPos(&mut at);
         // The menu closes when clicking elsewhere only if its window is in front.
@@ -500,13 +507,9 @@ fn tray_menu(hwnd: HWND, tx: &Sender<Event>) {
         let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, at.x, at.y, 0, hwnd, std::ptr::null()) as usize;
         PostMessageW(hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
-        let event = match chosen {
-            MENU_SHOW => Event::Activate("show".into()),
-            MENU_COMPACT => Event::Compact,
-            MENU_QUIT => Event::Quit,
-            _ => return,
-        };
-        let _ = tx.send(event);
+        if let Some(Some((_, id))) = chosen.checked_sub(1).and_then(|index| items.get(index)) {
+            let _ = tx.send(super::tray_event(id));
+        }
     }
 }
 
@@ -544,8 +547,9 @@ unsafe extern "system" fn shell_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 }
                 true
             }
-            WM_HOTKEY if wparam as i32 == HOTKEY_SHOW => {
-                let _ = state.tx.send(Event::Activate("show".into()));
+            WM_HOTKEY if wparam as i32 == HOTKEY_COMPOSE || wparam as i32 == HOTKEY_CAPTURE => {
+                let id = if wparam as i32 == HOTKEY_COMPOSE { "compose" } else { "capture" };
+                let _ = state.tx.send(Event::Activate(id.into()));
                 true
             }
             m if m == state.taskbar_created && state.tray => {
