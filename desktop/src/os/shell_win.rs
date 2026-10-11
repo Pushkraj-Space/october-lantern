@@ -3,6 +3,7 @@
 //! activates. Presence on every virtual desktop is not established by these styles alone.
 use super::shell::Role;
 use eframe::egui::{Pos2, Rect, pos2};
+use std::os::windows::ffi::OsStrExt;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -88,4 +89,91 @@ pub fn adopt(title: &str, role: Role) -> bool {
 pub fn cursor_position() -> Option<Pos2> {
     let mut point = POINT { x: 0, y: 0 };
     (unsafe { GetCursorPos(&mut point) } != 0).then(|| pos2(point.x as f32, point.y as f32))
+}
+
+/// Apps where a Task makes no sense (a normal session instead), by executable.
+const TERMINALS: [&str; 9] = [
+    "windowsterminal.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "conhost.exe",
+    "wezterm-gui.exe",
+    "alacritty.exe",
+    "mintty.exe",
+    "openconsole.exe",
+];
+
+/// The app in front: its name (the executable's description, else its file name), the window's
+/// title, and whether it's a terminal. Lantern's own windows never take focus, so this is still
+/// the person's app when they click the pill.
+pub fn foreground_app() -> Option<crate::model::AppContext> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let window = unsafe { GetForegroundWindow() };
+    if window.is_null() {
+        return None;
+    }
+    let mut pid = 0;
+    unsafe { GetWindowThreadProcessId(window, &mut pid) };
+    if pid == 0 || pid == std::process::id() {
+        return None;
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return None;
+    }
+    let mut buffer = [0u16; 1024];
+    let mut len = buffer.len() as u32;
+    let ok = unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut len) } != 0;
+    unsafe { CloseHandle(process) };
+    if !ok {
+        return None;
+    }
+    let exe = std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..len as usize]));
+    let file = exe.file_name()?.to_string_lossy().to_lowercase();
+    let stem = exe.file_stem()?.to_string_lossy().into_owned();
+    let mut text = [0u16; 512];
+    let title_len = unsafe { GetWindowTextW(window, text.as_mut_ptr(), text.len() as i32) } as usize;
+    let title = String::from_utf16_lossy(&text[..title_len]);
+    Some(crate::model::AppContext {
+        name: file_description(&exe).unwrap_or(stem),
+        is_terminal: TERMINALS.contains(&file.as_str()),
+        id: file,
+        window: (!title.is_empty()).then_some(title),
+        pid: Some(pid as i64),
+        ..Default::default()
+    })
+}
+
+/// The executable's FileDescription ("Visual Studio Code"), from its version resource.
+fn file_description(exe: &std::path::Path) -> Option<String> {
+    use windows_sys::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+    let path: Vec<u16> = exe.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let size = unsafe { GetFileVersionInfoSizeW(path.as_ptr(), std::ptr::null_mut()) };
+    if size == 0 {
+        return None;
+    }
+    let mut data = vec![0u8; size as usize];
+    if unsafe { GetFileVersionInfoW(path.as_ptr(), 0, size, data.as_mut_ptr().cast()) } == 0 {
+        return None;
+    }
+    let query = |key: &str| -> Option<(*const u8, u32)> {
+        let key: Vec<u16> = key.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut value = std::ptr::null_mut();
+        let mut len = 0u32;
+        (unsafe { VerQueryValueW(data.as_ptr().cast(), key.as_ptr(), &mut value, &mut len) } != 0 && !value.is_null() && len > 0)
+            .then_some((value as *const u8, len))
+    };
+    // The first language/code page the file lists.
+    let (translation, len) = query("\\VarFileInfo\\Translation")?;
+    if len < 4 {
+        return None;
+    }
+    let pair = unsafe { std::slice::from_raw_parts(translation as *const u16, 2) };
+    let (description, chars) = query(&format!("\\StringFileInfo\\{:04x}{:04x}\\FileDescription", pair[0], pair[1]))?;
+    let text = unsafe { std::slice::from_raw_parts(description as *const u16, chars as usize) };
+    let name = String::from_utf16_lossy(text).trim_end_matches('\0').trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
