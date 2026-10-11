@@ -80,6 +80,10 @@ impl Lantern {
             "agents" => UiAction::SetPanel(Some(PanelMode::Agents)),
             "new" => UiAction::StartNewSession,
             "capture" => UiAction::StartPointAsk,
+            // The Point & Ask shortcut: held to point and speak (the menu and the pill's button
+            // use "capture" and don't listen).
+            "point-press" => return self.point_ask_pressed(),
+            "point-release" => return self.point_ask_released(),
             "compose" => UiAction::Compose { agent_id: None },
             "settings" => UiAction::ShowSettings,
             "updates" => UiAction::CheckUpdates,

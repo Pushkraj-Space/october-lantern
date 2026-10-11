@@ -210,18 +210,32 @@ pub fn shortcuts(tx: Sender<Event>, message: String, point_ask: String) {
                 return Ok(());
             }
             let id = token();
-            let mut activated = proxy.receive_signal("Activated")?;
+            let mut signals = proxy.receive_all_signals()?;
             request(&connection, &id, || {
                 Ok(proxy.call("BindShortcuts", &(&session, bindings, "", Options::from([("handle_token".into(), text(&id))])))?)
             })?;
             let _ = tx.send(Event::Shortcuts(true));
-            for message in &mut activated {
+            for message in &mut signals {
                 if SHORTCUT_GENERATION.load(Ordering::SeqCst) != generation {
                     break;
                 }
+                let down = match message.header().member().map(|member| member.as_str()) {
+                    Some("Activated") => true,
+                    Some("Deactivated") => false,
+                    _ => continue,
+                };
                 let (handle, shortcut, _, _): (OwnedObjectPath, String, u64, Options) = message.body().deserialize()?;
-                let id = shortcut.split(':').next().unwrap_or_default().to_string();
-                if handle == session && tx.send(Event::Activate(id)).is_err() {
+                if handle != session {
+                    continue;
+                }
+                // Point & Ask is held to point and speak, so it reports both edges.
+                let activation = match (shortcut.split(':').next().unwrap_or_default(), down) {
+                    ("capture", true) => "point-press",
+                    ("capture", false) => "point-release",
+                    ("compose", true) => "compose",
+                    _ => continue,
+                };
+                if tx.send(Event::Activate(activation.into())).is_err() {
                     break;
                 }
             }

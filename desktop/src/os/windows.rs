@@ -30,7 +30,9 @@ use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
 use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
+};
 use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONTIMEOUT, NIN_BALLOONUSERCLICK,
     NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW, ShellExecuteW,
@@ -588,9 +590,23 @@ unsafe extern "system" fn shell_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 }
                 true
             }
-            WM_HOTKEY if wparam as i32 == HOTKEY_COMPOSE || wparam as i32 == HOTKEY_CAPTURE => {
-                let id = if wparam as i32 == HOTKEY_COMPOSE { "compose" } else { "capture" };
-                let _ = state.tx.send(Event::Activate(id.into()));
+            WM_HOTKEY if wparam as i32 == HOTKEY_COMPOSE => {
+                let _ = state.tx.send(Event::Activate("compose".into()));
+                true
+            }
+            // Point & Ask is held to point and speak. Windows reports only the press, so its key
+            // (lParam's high word) is watched until it comes up.
+            WM_HOTKEY if wparam as i32 == HOTKEY_CAPTURE => {
+                let _ = state.tx.send(Event::Activate("point-press".into()));
+                let key = ((lparam as usize >> 16) & 0xFFFF) as i32;
+                let tx = state.tx.clone();
+                std::thread::spawn(move || {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                    while unsafe { GetAsyncKeyState(key) } as u16 & 0x8000 != 0 && std::time::Instant::now() < deadline {
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                    }
+                    let _ = tx.send(Event::Activate("point-release".into()));
+                });
                 true
             }
             m if m == state.taskbar_created && state.tray => {

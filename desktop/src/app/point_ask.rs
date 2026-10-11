@@ -7,6 +7,7 @@ use super::{Lantern, Pending};
 use crate::model::{AppContext, AskTurn, Capture, PanelMode, PointAskModel, PointAskPhase};
 use crate::october_ai::{self, Failure, Piece};
 use crate::os::Event;
+use crate::ui::DictationOwner;
 use eframe::egui::Rect;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,16 +33,49 @@ pub(super) struct Pointing {
     pub rect: Option<Rect>,
     /// The selected area as PNG, once captured.
     shot: Option<Vec<u8>>,
+    /// When the shortcut was pressed, while it's held (letting go after a hold stops listening).
+    pressed_at: Option<Instant>,
+    /// The next selection starts with dictation on (the shortcut, not the pill's button).
+    listen: bool,
 }
 
+/// Holding the shortcut longer than this, then letting go, stops listening; a tap keeps it on.
+const HOLD: Duration = Duration::from_millis(350);
+
 impl Lantern {
-    /// The pill's button: close the panel, then select.
+    /// The pill's button (and the tray menu): close the panel, then select. No listening.
     pub(super) fn start_point_ask(&mut self) {
         if self.model.point_ask.phase == PointAskPhase::Selecting {
             return;
         }
+        self.pointing.pressed_at = None;
+        self.pointing.listen = false;
         self.set_panel(None);
         self.pointing.start_at = Some(Instant::now() + PANEL_FADE);
+    }
+
+    /// The shortcut went down (Swift `PointAsk.pressed`): select while listening, so you can hold
+    /// it, point and speak. Pressed again while the card is up, it stops or resumes listening.
+    pub(super) fn point_ask_pressed(&mut self) {
+        match self.model.point_ask.phase {
+            PointAskPhase::Selecting => {}
+            PointAskPhase::Card => self.toggle_dictation(DictationOwner::PointAsk),
+            PointAskPhase::Closed => {
+                self.pointing.pressed_at = Some(Instant::now());
+                self.pointing.listen = true;
+                self.set_panel(None);
+                self.pointing.start_at = Some(Instant::now());
+            }
+        }
+    }
+
+    /// The shortcut came up (Swift `PointAsk.released`): after a hold, stop listening and wait for
+    /// Enter; a quick tap keeps listening.
+    pub(super) fn point_ask_released(&mut self) {
+        let held = self.pointing.pressed_at.take().is_some_and(|at| at.elapsed() > HOLD);
+        if held && self.model.point_ask.listening {
+            self.toggle_dictation(DictationOwner::PointAsk);
+        }
     }
 
     pub(super) fn point_ask_tick(&mut self) {
@@ -60,6 +94,13 @@ impl Lantern {
         let context = crate::os::foreground_app();
         let recipient = default_recipient(&self.model.agents, context.as_ref(), self.inputs.drafts.recipient());
         self.model.point_ask = PointAskModel { phase: PointAskPhase::Selecting, context, recipient, ..Default::default() };
+        if std::mem::take(&mut self.pointing.listen) {
+            // Another draft's dictation ends: this one is about what you point at.
+            if self.model.dictating {
+                self.cancel_dictation();
+            }
+            self.toggle_dictation(DictationOwner::PointAsk);
+        }
     }
 
     /// The overlay finished: an area in screen pixels, or `None` (Esc).
@@ -464,6 +505,25 @@ mod tests {
         lantern.point_ask_piece(generation - 1, 0, Piece::Text("stale".into()));
         lantern.point_ask_piece(generation, 0, Piece::Text("fresh".into()));
         assert_eq!(lantern.model.point_ask.turns[0].answer, "fresh");
+    }
+
+    #[test]
+    fn the_shortcut_listens_but_the_pills_button_does_not() {
+        let mut lantern = lantern();
+        lantern.point_ask_pressed();
+        assert!(lantern.pointing.listen && lantern.pointing.pressed_at.is_some());
+        lantern.start_point_ask();
+        assert!(!lantern.pointing.listen && lantern.pointing.pressed_at.is_none(), "the pill's button never listens");
+        // Pressed while selecting: nothing changes. A quick tap's release keeps listening.
+        lantern.point_ask_pressed();
+        lantern.begin_point_ask();
+        assert_eq!(lantern.model.point_ask.phase, PointAskPhase::Selecting);
+        lantern.model.point_ask.listening = true;
+        lantern.point_ask_pressed();
+        assert!(lantern.model.point_ask.listening);
+        lantern.pointing.pressed_at = Some(Instant::now());
+        lantern.point_ask_released();
+        assert!(lantern.model.point_ask.listening, "a tap keeps listening");
     }
 
     #[test]
