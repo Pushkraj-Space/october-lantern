@@ -5,6 +5,9 @@
 #![allow(dead_code)]
 
 pub mod assets;
+pub mod components;
+pub mod icons;
+pub mod theme;
 
 use crate::model::{AgentId, AgentKind, AppContext, Edge, Inputs, Model, PanelMode};
 use eframe::egui;
