@@ -63,6 +63,23 @@ pub enum Event {
         turn: u64,
         error: Option<String>,
     },
+    /// A piece of a Point & Ask answer, for the conversation `generation` and its `turn` (index).
+    PointAsk {
+        generation: u64,
+        turn: usize,
+        piece: crate::october_ai::Piece,
+    },
+    PointAskDone {
+        generation: u64,
+        turn: usize,
+        error: Option<String>,
+    },
+    /// Point & Ask's message for an agent is ready (its screenshot saved), or couldn't be.
+    PointAskSent {
+        generation: u64,
+        agent_id: String,
+        text: Result<String, String>,
+    },
 }
 // Wake/map the native window before waiting for another frame. A hidden Wayland window may
 // receive no frame callbacks; a repaint request alone cannot reliably activate it from the tray.

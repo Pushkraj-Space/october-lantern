@@ -154,6 +154,10 @@ impl Lantern {
                     self.show(format!("@{handle}: {}", text(event, "message").unwrap_or_else(|| "not sent; your draft is kept".into())));
                 }
             }
+            Some(Pending::Direct { agent_id }) if !ok => {
+                let handle = self.model.agent(&agent_id).map_or("agent".to_string(), |agent| agent.handle.clone());
+                self.show(format!("@{handle}: {}", text(event, "message").unwrap_or_else(|| "not sent".into())));
+            }
             Some(Pending::Keys { agent_id }) if !ok => {
                 let handle = self.model.agent(&agent_id).map_or("agent".to_string(), |agent| agent.handle.clone());
                 self.show(format!("@{handle}: {}", text(event, "message").unwrap_or_else(|| "couldn't answer".into())));

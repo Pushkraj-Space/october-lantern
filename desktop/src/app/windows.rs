@@ -54,6 +54,8 @@ pub struct Windows {
     capturing: bool,
     /// The pill's help text under the pointer, and since when (shown after a moment).
     tip: Option<(String, Rect, Vec2, f64)>,
+    /// Point & Ask's overlay and card.
+    pub select: super::select::State,
 }
 
 impl Windows {
@@ -62,6 +64,13 @@ impl Windows {
             || self.snap.is_some()
             || self.panel_opened.is_some_and(|at| at.elapsed().as_secs_f32() < FADE)
             || self.hover.expanded
+    }
+    /// The pill's window, in points, once placed.
+    pub fn pill_rect(&self) -> Option<Rect> {
+        self.pill_at.map(|at| Rect::from_min_size(at, self.pill_size.unwrap_or(PILL_COLLAPSED)))
+    }
+    pub fn work_areas(&self) -> Vec<Rect> {
+        self.areas.clone()
     }
     pub fn copy(&mut self, text: String) {
         self.clipboard = Some(text);
@@ -211,6 +220,7 @@ impl Lantern {
             }
             ctx.request_repaint();
             self.panel(&ctx, work, scale);
+            self.point_ask_windows(&ctx, scale, true);
             return;
         }
         // The pill.
@@ -254,6 +264,7 @@ impl Lantern {
 
         self.tip(&ctx, size);
         self.panel(&ctx, work, scale);
+        self.point_ask_windows(&ctx, scale, false);
     }
 
     /// The pill's help text, beside the pill, after half a second (a native tooltip on the Mac).

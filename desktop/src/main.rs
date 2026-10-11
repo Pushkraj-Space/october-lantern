@@ -565,7 +565,11 @@ impl Lantern {
             }
             Event::AskDelta { .. } => {}
             // The new app's (--shell) Ask Lantern; the legacy window doesn't use it.
-            Event::Assistant { .. } | Event::AssistantDone { .. } => {}
+            Event::Assistant { .. }
+            | Event::AssistantDone { .. }
+            | Event::PointAsk { .. }
+            | Event::PointAskDone { .. }
+            | Event::PointAskSent { .. } => {}
             Event::Update(result) => {
                 self.update_pending = false;
                 match result {
@@ -971,7 +975,13 @@ fn main() -> anyhow::Result<()> {
     }
     if args.iter().any(|arg| arg == "--shell") {
         let settings = Settings::load().unwrap_or_default();
-        let start = args.iter().any(|arg| arg == "--new-session").then_some(ui::UiAction::StartNewSession);
+        let start = if args.iter().any(|arg| arg == "--new-session") {
+            Some(ui::UiAction::StartNewSession)
+        } else if args.iter().any(|arg| arg == "--point-ask") {
+            Some(ui::UiAction::StartPointAsk)
+        } else {
+            None
+        };
         return app::run(&settings.terminal, start);
     }
     if args.iter().any(|arg| arg == "--help") {

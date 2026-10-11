@@ -2,9 +2,9 @@
 //! window roles (on top, every workspace, out of the taskbar, a pill that never takes focus),
 //! and, where it's reliable, the global pointer (CONTRACT §6–7).
 #[cfg(windows)]
-pub use super::shell_win::{adopt, cursor_position, work_areas};
+pub use super::shell_win::{adopt, cursor_position, monitors, work_areas};
 #[cfg(target_os = "linux")]
-pub use super::shell_x11::{adopt, cursor_position, foreground_app, work_areas, x11_available};
+pub use super::shell_x11::{adopt, cursor_position, foreground_app, monitors, work_areas, x11_available};
 
 /// The app in front. Not yet on Windows (GetForegroundWindow + the process image), until the
 /// Windows build can be checked.
@@ -19,15 +19,14 @@ pub enum Role {
     Pill,
     /// Takes focus when clicked; losing it closes an idle panel.
     Panel,
-    /// The Point & Ask card: like the panel.
-    #[allow(dead_code)] // the Point & Ask card lands next
+    /// The Point & Ask card and selection overlay: like the panel.
     Card,
 }
 
 /// Window titles, so the platform layer can find each viewport's native window.
 pub const PILL_TITLE: &str = "October Lantern";
 pub const PANEL_TITLE: &str = "October Lantern panel";
-#[allow(dead_code)] // the Point & Ask card lands next
+pub const SELECT_TITLE: &str = "October Lantern · Select";
 pub const CARD_TITLE: &str = "October Lantern · Point & Ask";
 
 #[cfg(windows)]

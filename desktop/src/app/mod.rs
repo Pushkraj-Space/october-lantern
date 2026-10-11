@@ -24,7 +24,10 @@ mod apply;
 mod assistant;
 mod engine;
 pub mod fixture;
+mod point_ask;
+mod select;
 mod session;
+mod shots;
 mod windows;
 
 use crate::model::{Inputs, Model, Prefs, drafts::Ticket, inbox::Turns};
@@ -53,6 +56,10 @@ enum Pending {
         agent_id: String,
     },
     Launch,
+    /// A message sent without the composer (Point & Ask).
+    Direct {
+        agent_id: String,
+    },
 }
 
 pub struct Lantern {
@@ -73,6 +80,7 @@ pub struct Lantern {
     actions: Vec<UiAction>,
     launching: session::Launching,
     asking: assistant::Asking,
+    pointing: point_ask::Pointing,
     /// The October account, once signed in (its access token asks October's AI).
     session: Option<crate::account::Session>,
     /// Sign-in attempts: a newer one (or signing out) makes older results stale.
@@ -115,6 +123,7 @@ impl Lantern {
             actions: Vec::new(),
             launching: session::Launching::default(),
             asking: assistant::Asking::default(),
+            pointing: point_ask::Pointing::default(),
             session: None,
             auth: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
             vault: None,
@@ -143,6 +152,13 @@ impl Lantern {
                 self.windows.capture_done();
                 self.screenshot_captured(generation, result);
             }
+            Event::Screenshot { owner, generation, result } if owner == "__point" => {
+                self.windows.capture_done();
+                self.point_ask_captured(generation, result);
+            }
+            Event::PointAsk { generation, turn, piece } => self.point_ask_piece(generation, turn, piece),
+            Event::PointAskDone { generation, turn, error } => self.point_ask_done(generation, turn, error),
+            Event::PointAskSent { generation, agent_id, text } => self.point_ask_sent(generation, agent_id, text),
             Event::Folder(result) => {
                 self.windows.native_dialog = false;
                 match result {
@@ -275,6 +291,7 @@ impl Lantern {
         }
         self.launch_tick();
         self.assistant_tick();
+        self.point_ask_tick();
     }
 }
 

@@ -117,7 +117,8 @@ fn request(connection: &Connection, token: &str, call: impl FnOnce() -> Result<O
     std::thread::spawn(move || {
         let result = signals.next().context("portal disconnected").and_then(|message| {
             let (code, options): (u32, Options) = message.body().deserialize()?;
-            anyhow::ensure!(code == 0, "Desktop request cancelled or denied");
+            // 1: the person cancelled; 2: denied or failed (e.g. no permission for a non-interactive capture).
+            anyhow::ensure!(code == 0, "Desktop request cancelled or denied (code {code})");
             Ok(options)
         });
         let _ = tx.send(result);
@@ -141,7 +142,10 @@ pub fn capture_screen() -> Result<PathBuf> {
     portal_screenshot(false)
 }
 fn portal_screenshot(interactive: bool) -> Result<PathBuf> {
-    let connection = connection()?;
+    // GNOME 50 denies a non-interactive capture to a host app registered under an app ID
+    // (response 2, no dialog), but asks the person once for an unregistered one. So captures
+    // without the chooser go out unregistered; everything else registers.
+    let connection = if interactive { connection()? } else { Connection::session()? };
     let proxy = portal(&connection, "org.freedesktop.portal.Screenshot")?;
     let id = token();
     let options = Options::from([("handle_token".into(), text(&id)), ("interactive".into(), interactive.into())]);

@@ -13,19 +13,32 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 /// Work areas (each monitor without its taskbar), in physical pixels.
 pub fn work_areas() -> Vec<Rect> {
+    displays(false)
+}
+
+/// Whole monitors, in physical pixels (Point & Ask's selection overlay).
+pub fn monitors() -> Vec<Rect> {
+    displays(true)
+}
+
+fn displays(whole: bool) -> Vec<Rect> {
+    struct Out {
+        whole: bool,
+        areas: Vec<Rect>,
+    }
     unsafe extern "system" fn each(monitor: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> i32 {
-        let areas = unsafe { &mut *(data as *mut Vec<Rect>) };
+        let out = unsafe { &mut *(data as *mut Out) };
         let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
         if unsafe { GetMonitorInfoW(monitor, &mut info) } != 0 {
-            let r = info.rcWork;
-            areas.push(Rect::from_min_max(pos2(r.left as f32, r.top as f32), pos2(r.right as f32, r.bottom as f32)));
+            let r = if out.whole { info.rcMonitor } else { info.rcWork };
+            out.areas.push(Rect::from_min_max(pos2(r.left as f32, r.top as f32), pos2(r.right as f32, r.bottom as f32)));
         }
         1
     }
-    let mut areas: Vec<Rect> = Vec::new();
-    unsafe { EnumDisplayMonitors(std::ptr::null_mut(), std::ptr::null(), Some(each), &mut areas as *mut _ as LPARAM) };
-    areas
+    let mut out = Out { whole, areas: Vec::new() };
+    unsafe { EnumDisplayMonitors(std::ptr::null_mut(), std::ptr::null(), Some(each), &mut out as *mut _ as LPARAM) };
+    out.areas
 }
 
 /// This process's top-level window with `title`.

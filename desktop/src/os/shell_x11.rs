@@ -74,6 +74,29 @@ impl X {
     }
 }
 
+/// Whole monitors in physical pixels (RandR), for Point & Ask's selection overlay.
+pub fn monitors() -> Vec<Rect> {
+    let Some(x) = X::connect() else { return Vec::new() };
+    let monitors: Vec<Rect> = x
+        .conn
+        .randr_get_monitors(x.root, true)
+        .ok()
+        .and_then(|c| c.reply().ok())
+        .map(|reply| {
+            reply
+                .monitors
+                .iter()
+                .map(|m| Rect::from_min_size(pos2(m.x as f32, m.y as f32), vec2(m.width as f32, m.height as f32)))
+                .collect()
+        })
+        .unwrap_or_default();
+    if monitors.is_empty() {
+        let screen = &x.conn.setup().roots[0];
+        return vec![Rect::from_min_size(pos2(0.0, 0.0), vec2(screen.width_in_pixels as f32, screen.height_in_pixels as f32))];
+    }
+    monitors
+}
+
 /// Work areas in physical pixels, one per monitor: each RandR monitor clipped to `_NET_WORKAREA`
 /// (which excludes panels like GNOME's top bar). Empty when there is no X server.
 pub fn work_areas() -> Vec<Rect> {
