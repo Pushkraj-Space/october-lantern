@@ -83,6 +83,15 @@ pub fn outcome(typed: Written, entered: Option<Written>) -> Result<()> {
     }
 }
 
+/// The re-check before Enter: the text is already in, so a console that changed hands means the
+/// delivery is unfinished (uncertain), and Enter isn't pressed.
+#[cfg(any(windows, test))]
+pub fn before_enter(check: Result<()>) -> Result<()> {
+    check.map_err(|changed| {
+        crate::deliver::Uncertain(format!("the text went in, but {changed:#} before Enter, so Lantern didn't press it")).into()
+    })
+}
+
 /// The helper's result, from its exit: uncertain and failed stay distinct across the process.
 pub fn from_exit(code: Option<i32>, stderr: &str) -> Result<()> {
     match code {
@@ -123,18 +132,15 @@ pub fn type_into(pid: u32, start: u64, kind: &str, mode: &str, payload: &str) ->
     };
 
     let keys = keys(mode, payload).context("nothing to type")?;
-    let live = crate::procs::live(pid).context("the agent has exited")?;
-    if live.start != start {
-        bail!("the agent has exited and another process took its place");
-    }
     let ancestors = crate::procs::ancestors_of(pid);
-    unsafe {
-        FreeConsole();
-        if AttachConsole(pid) == 0 {
-            bail!("couldn't reach the agent's console");
+    let allowed = native_programs(kind);
+    // The same agent, still on this console, with nothing else reading it. Checked before the text
+    // and again before Enter: the agent may exit (back to its shell) or start a tool in between.
+    let check = || -> Result<()> {
+        let live = crate::procs::live(pid).context("the agent has exited")?;
+        if live.start != start {
+            bail!("the agent has exited and another process took its place");
         }
-    }
-    let result = (|| -> Result<()> {
         let mut attached = vec![0u32; 64];
         let mut count = unsafe { GetConsoleProcessList(attached.as_mut_ptr(), attached.len() as u32) } as usize;
         if count > attached.len() {
@@ -145,7 +151,6 @@ pub fn type_into(pid: u32, start: u64, kind: &str, mode: &str, payload: &str) ->
         if !attached.contains(&pid) {
             bail!("the agent is no longer on its console");
         }
-        let allowed = native_programs(kind);
         let native = |other: u32| {
             !allowed.is_empty()
                 && crate::procs::ancestors_of(other).contains(&pid)
@@ -156,6 +161,17 @@ pub fn type_into(pid: u32, start: u64, kind: &str, mode: &str, payload: &str) ->
         if !others_on_console(&attached, std::process::id(), pid, &ancestors, native).is_empty() {
             bail!("something else is running in the agent's terminal, so Lantern won't type there now");
         }
+        Ok(())
+    };
+    crate::procs::live(pid).filter(|live| live.start == start).context("the agent has exited")?;
+    unsafe {
+        FreeConsole();
+        if AttachConsole(pid) == 0 {
+            bail!("couldn't reach the agent's console");
+        }
+    }
+    let result = (|| -> Result<()> {
+        check()?;
         let name: Vec<u16> = "CONIN$\0".encode_utf16().collect();
         let input = unsafe {
             CreateFileW(
@@ -200,13 +216,18 @@ pub fn type_into(pid: u32, start: u64, kind: &str, mode: &str, payload: &str) ->
             }
         };
         let typed = write(&records(&keys));
-        // A paste, then Return as a key press of its own (see deliver::ENTER_AFTER_PASTE).
+        // A paste, then Return as a key press of its own (see deliver::ENTER_AFTER_PASTE), only
+        // if the console still belongs to the agent alone.
         let entered = (typed == Written::All && mode == "text").then(|| {
             std::thread::sleep(crate::deliver::ENTER_AFTER_PASTE);
-            write(&records(&[ENTER]))
+            before_enter(check()).map(|()| write(&records(&[ENTER])))
         });
         unsafe { CloseHandle(input) };
-        outcome(typed, if mode == "text" { Some(entered.unwrap_or(Written::Nothing)) } else { None })
+        match entered {
+            Some(Err(changed)) => Err(changed),
+            Some(Ok(entered)) => outcome(typed, Some(entered)),
+            None => outcome(typed, (mode == "text").then_some(Written::Nothing)),
+        }
     })();
     unsafe { FreeConsole() };
     result
@@ -265,6 +286,10 @@ mod tests {
         assert!(uncertain(outcome(Written::Part, Some(Written::All))));
         assert!(uncertain(outcome(Written::All, Some(Written::Nothing))), "text in, no Enter");
         assert!(uncertain(outcome(Written::All, Some(Written::Part))));
+        // The agent left, or a tool started, during the pause: no Enter, and it's uncertain.
+        assert!(before_enter(Ok(())).is_ok());
+        let changed = before_enter(Err(anyhow::anyhow!("the agent is no longer on its console")));
+        assert!(changed.as_ref().is_err_and(|e| e.to_string().contains("didn't press it")) && uncertain(changed));
         // ...and that survives the helper's exit.
         assert!(from_exit(Some(0), "").is_ok());
         assert!(uncertain(from_exit(Some(UNCERTAIN_EXIT), "the text went in but Enter didn't")));
