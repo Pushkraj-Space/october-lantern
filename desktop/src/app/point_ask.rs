@@ -66,6 +66,8 @@ impl Lantern {
             // Esc while reselecting goes back to the card as it was; before any card, it cancels.
             if self.pointing.card_shown {
                 self.model.point_ask.phase = PointAskPhase::Card;
+                // The card's question box takes focus each time it appears (Swift `.onAppear { focused = true }`).
+                self.model.compose_focus += 1;
             } else {
                 self.cancel_point_ask();
             }
@@ -75,6 +77,7 @@ impl Lantern {
         self.pointing.card_shown = true;
         self.pointing.rect = Some(rect);
         self.model.point_ask.phase = PointAskPhase::Card;
+        self.model.compose_focus += 1;
         self.model.point_ask.screenshot = Capture::Capturing;
         self.model.point_ask.problem = None;
         let generation = self.pointing.selection;
@@ -444,6 +447,19 @@ mod tests {
         lantern.point_ask_piece(generation - 1, 0, Piece::Text("stale".into()));
         lantern.point_ask_piece(generation, 0, Piece::Text("fresh".into()));
         assert_eq!(lantern.model.point_ask.turns[0].answer, "fresh");
+    }
+
+    #[test]
+    fn the_card_takes_focus_each_time_it_appears() {
+        let mut lantern = lantern();
+        lantern.begin_point_ask();
+        let before = lantern.model.compose_focus;
+        lantern.point_ask_selected(Some(Rect::from_min_size(eframe::egui::pos2(10.0, 10.0), eframe::egui::vec2(100.0, 80.0))));
+        assert_eq!(lantern.model.compose_focus, before + 1);
+        lantern.reselect_point_ask();
+        lantern.point_ask_selected(None);
+        assert_eq!(lantern.model.point_ask.phase, PointAskPhase::Card);
+        assert_eq!(lantern.model.compose_focus, before + 2, "back on the card after Esc while reselecting");
     }
 
     #[test]
