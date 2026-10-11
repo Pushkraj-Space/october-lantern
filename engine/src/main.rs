@@ -10,6 +10,7 @@
 mod actions;
 mod apps;
 mod bus;
+mod console;
 mod deliver;
 mod harness;
 mod history;
@@ -20,11 +21,14 @@ mod model;
 mod models;
 mod october_core;
 mod october_link;
+mod platform;
 mod procs;
+mod pty;
 mod readers;
 mod run;
 mod scanner;
 mod serve;
+mod sqlite;
 #[cfg(test)]
 mod tests;
 mod tmux;
@@ -37,6 +41,25 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("serve") => serve::run(),
+        // Lantern's own terminal sessions on Windows (see pty.rs).
+        #[cfg(windows)]
+        Some("pty-host") => pty::host(args.get(1).map(String::as_str).unwrap_or("")),
+        #[cfg(windows)]
+        Some("attach") => pty::attach(args.get(1).map(String::as_str).unwrap_or("")),
+        // Types into an agent's own console (see console.rs); run by the engine, not by people.
+        #[cfg(windows)]
+        Some("console-type") => {
+            let number = |i: usize| args.get(i).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let text = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
+            match console::type_into(number(1) as u32, number(2), text(3), text(4), text(5)) {
+                // Keys may be in the console: say so with the exit code, not as a plain failure.
+                Err(error) if error.downcast_ref::<deliver::Uncertain>().is_some() => {
+                    eprintln!("{error:#}");
+                    std::process::exit(console::UNCERTAIN_EXIT)
+                }
+                other => other,
+            }
+        }
         Some("agents") | None => {
             let agents = scanner::Scanner::new().scan();
             println!("{}", serde_json::to_string_pretty(&agents)?);

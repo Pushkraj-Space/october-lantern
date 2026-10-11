@@ -7,7 +7,7 @@
 <h1 align="center">Your agents work. You get your day back.</h1>
 
 <p align="center">
-  A little light at the edge of your Mac that glows when an AI coding agent needs you.<br />
+  A little light that glows when an AI coding agent needs you.<br />
   Read what it said, send a reply, and get back to what you were doing.
 </p>
 
@@ -111,7 +111,7 @@ No. Keep opening your agents in your usual terminals. Lantern discovers supporte
 <details>
 <summary><strong>Is Lantern free? Does it work on Windows or Linux?</strong></summary>
 
-The core Mac app is free, and it stays free forever. The source code is licensed under Apache 2.0. If you have a paid October plan, sign in and your plan's extras, like cloud agents, are available in Lantern automatically. Lantern currently runs on macOS 14 or later, on Apple silicon and Intel. Windows and Linux apps aren't available yet.
+The core Mac app is free, and it stays free forever. The source code is licensed under Apache 2.0. If you have a paid October plan, sign in and your plan's extras, like cloud agents, are available in Lantern automatically. Lantern currently runs on macOS 14 or later, on Apple silicon and Intel. Lantern for Linux and Windows builds from source: the same pill and panel as the Mac app, written in Rust (Windows is a preview).
 
 </details>
 
@@ -135,6 +135,167 @@ To uninstall, open **Settings → About → Uninstall October Lantern**. This re
 
 Want to improve Lantern or add support for your favorite agent? The app uses Swift / AppKit / SwiftUI, with a Rust engine for agent discovery and terminal integration.
 
+### Linux and Windows (Rust)
+
+`desktop/` is the Linux and Windows app: the Mac app's design and behaviour in Rust (egui).
+Lantern is a small pill at the edge of the screen; hover it for its actions, click the
+lantern for Ask Lantern, and its panel opens beside it with Waiting, Your agents, chats,
+New Session and October. Point & Ask, notifications, the tray and global shortcuts
+(Ctrl+Alt+Space messages an agent, Ctrl+Alt+P starts Point & Ask) work as on the Mac.
+`--new-session`, `--point-ask`, `--ask`, `--connections`, `--settings` and `--welcome`
+open those directly (a second launch hands them to the running Lantern), and
+`--fixture FILE.json --out FILE.png --scale 2` renders any surface from a saved model.
+
+Where a platform can't do what the Mac does, Lantern does the closest thing and says so:
+GNOME has no backdrop blur, so the glass is a tinted fill; on Wayland the pill runs through
+XWayland (a Wayland app can't place its own window), and Point & Ask can't pick another
+app's window, so a click takes the whole screen; without XWayland at all there's no edge
+pill, and Lantern opens as a normal window; without a tray host (GNOME needs the
+AppIndicator extension) the lantern's right-click menu also has Quit. The shortcut choices
+are the Mac's, except ⌥Space: Alt+Space opens the window menu on GNOME and Windows.
+
+#### Linux
+
+Install a current stable Rust toolchain from [rustup](https://rustup.rs), a C compiler,
+Mesa/OpenGL, and your distribution's Wayland/X11 runtime libraries. Install `tmux`
+for direct replies and background sessions. Database history uses bundled SQLite.
+On Fedora, these can be installed with:
+
+```sh
+sudo dnf install gcc tmux mesa-libGL libxkbcommon wayland-libs
+```
+
+Build and run from the repository root:
+
+```sh
+scripts/build-app.sh --debug
+./build/linux/october-lantern
+```
+
+Omit `--debug` for an optimized build. Both `october-lantern` and `lantern-engine`
+are placed in `build/linux/`; keep them together. The desktop starts the engine as
+its sidecar using the same JSON-lines protocol as the Mac app. `LANTERN_ENGINE`
+can override its path during development.
+
+Replies go through the engine's safety checks. Agents in ordinary terminals are
+discovered too; sessions started In Lantern run in `tmux` and take direct replies, and
+agents in your own terminals do too when they run inside `tmux`. Clipboard replies work for other terminals. Supported terminal
+launchers include Ptyxis, GNOME Terminal, Konsole, Kitty, Alacritty, Ghostty, Foot,
+WezTerm, Xfce Terminal, and xterm. Set `LANTERN_TERMINAL` to a supported executable
+name or absolute path to choose one.
+
+Linux data lives under `${XDG_DATA_HOME:-~/.local/share}/october-lantern`.
+Preferences live in `${XDG_CONFIG_HOME:-~/.config}/october-lantern/lantern-state.json`
+(the terminal and dictation paths in `settings.json` beside it). Settings has the
+Mac's sections: open at login, the pill's edge, shortcuts, updates, new-session
+defaults, agent hooks, notifications and which agents count in Waiting. Hooks back up and
+update supported agents' configuration. Screenshots and the folder picker use XDG
+desktop portals; shortcuts need approval in the desktop's dialog once. Notifications and
+credential refresh continue while the desktop is locked. Repeated
+snapshots are coalesced so they do not build up in the background.
+Screenshots are private files, pruned after a week; audio recordings are removed
+after dictation. Lantern never sends dictation audio to a cloud service.
+
+To install local dictation (C++ compiler and CMake, or `uv`, required):
+
+```sh
+scripts/setup-dictation.sh
+```
+
+This installs whisper.cpp and a checksum-verified multilingual base model, and
+configures Lantern. Restart the app afterward. PipeWire's `pw-record` records audio.
+On Fedora the optional runtime packages are `pipewire-utils libsecret`.
+
+To bundle October Bus from the pinned source (Go 1.27+ required):
+
+```sh
+scripts/build-bus-linux.sh
+python3 scripts/smoke-linux.py --bus
+```
+
+The native Bus executable lives beside the engine. New sessions can enable Bus
+and share the local toolkit; no October account is needed. `LANTERN_BUS_BIN` can
+override the bundled binary for development.
+
+The October panel has October account sign-in and October Desktop pairing. Saved
+sign-in uses the Linux Secret Service through `secret-tool`; without it, sign-in works
+for the current session. Ask Lantern and Point & Ask stream October AI answers with
+follow-up questions; October receives a question (and Point & Ask's screenshot) only
+when you ask. October Harness, the default agent when Claude Code and Codex aren't
+installed, installs itself with its own checksum-verified Node.js.
+
+The app can check Linux updates daily when enabled, and install a checksum-verified
+native bundle on request. `scripts/package-linux.sh` creates the bundle and SHA-256
+file; the Linux release workflow builds them as CI artifacts. Its optional Publish
+input uploads them only when explicitly selected. A published Linux bundle is
+needed before the updater can offer it. This fork uses its own releases; set
+`LANTERN_RELEASES_REPO=owner/repo` at build time to choose another release source.
+It never uses Mac release assets. Database history is read directly with bundled
+SQLite, so the app does not need a system `sqlite3` executable.
+
+#### Windows (preview)
+
+The same app and engine build for Windows 10 and 11. Install stable Rust
+from [rustup](https://rustup.rs) with the MSVC toolchain (Visual Studio Build Tools),
+then from PowerShell in the repository root:
+
+```powershell
+pwsh scripts/build-windows.ps1 -Debug
+.\build\windows\october-lantern.exe
+```
+
+Omit `-Debug` for an optimized build without a console window. `scripts/check.ps1` is
+the Windows check, and `python scripts/smoke-windows.py` tests discovery, sessions and
+replies against a harmless agent.
+
+To bundle October Bus (Go 1.27+), set up local dictation (git, CMake or the Visual Studio
+C++ tools), and build the release zip and installer ([Inno Setup](https://jrsoftware.org/isinfo.php)):
+
+```powershell
+pwsh scripts/build-bus-windows.ps1
+pwsh scripts/setup-dictation.ps1
+pwsh scripts/package-windows.ps1
+```
+
+The installer (`October-Lantern-windows-x86_64-setup.exe`) installs for the current user
+without administrator rights, adds a Start menu shortcut and optionally starts Lantern at
+sign-in; uninstalling also removes Lantern's agent hooks. Set `WINDOWS_CERTIFICATE`
+(a base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` to have `package-windows.ps1` sign the
+programs and the installer; the Windows release workflow reads them from repository secrets.
+
+What works: Lantern finds Claude Code, Codex and the other supported agents running
+in Windows Terminal, VS Code, Cursor, WezTerm and plain console windows, including
+npm installs. It shows their state, last message and full conversation. Open brings
+the agent's terminal window to the front (the window, not the exact tab). You also
+get the tray menu, notifications, the global shortcuts, start at sign-in, saved sign-in in
+Windows Credential Manager, and agent hooks.
+
+Replies go to sessions Lantern starts (New Session). Lantern runs the agent in a
+session of its own (a ConPTY pseudo console, in place of tmux) that keeps running when
+you close Lantern. Open terminal shows it in a Windows Terminal tab, or a console window
+when Windows Terminal isn't installed, and closing that window leaves the agent running.
+Lantern runs the agent itself, not through a shell or `cmd.exe` (npm's `.cmd` shims are
+unwrapped to Node), and the session ends when the agent exits, so a reply can't land in a
+shell. Before typing, it checks that the agent is still the process the session started,
+on that session's console. Agents you start in your own terminal are followed but never
+typed into: Windows has no safe way to type into another app's terminal.
+
+Sessions can join October Bus like on Linux. Screenshots (Point & Ask and New Session)
+capture the display under the pointer with Lantern's own windows left out. Dictation
+records your default microphone and transcribes on this computer with whisper.cpp, after
+`scripts/setup-dictation.ps1`. The app installs updates itself on request: it downloads
+the release zip, checks its SHA-256 and that every program is a native Windows build,
+unpacks it into its own folder, checks the new app can talk to its engine, then restarts
+and points the Start menu shortcut there. Agent sessions, their windows and the Bus run
+from Lantern's own copies in its data folder, so updating or reinstalling never stops
+them. Data lives in `%LOCALAPPDATA%\October Lantern`, preferences in
+`%APPDATA%\October Lantern`. The
+preview is built and tested in CI (`scripts/check-windows-types.sh` also type-checks the
+Windows code from Linux). It hasn't been tried by hand on a Windows machine yet, so please
+report what you find.
+
+### macOS
+
 With **Xcode 26** and a current **stable Rust toolchain** installed, run these commands from the repository root:
 
 ```sh
@@ -142,7 +303,7 @@ scripts/build-app.sh
 open "build/October Lantern.app"
 ```
 
-Run `scripts/check.sh` before submitting changes. It checks the engine, builds and tests the Mac app, and validates the shell scripts.
+Run `scripts/check.sh` before submitting changes. It checks the engine, builds and tests the UI for the current OS, and validates the shell scripts.
 
 See the [product and development guide](docs/PRODUCT.md), [engine protocol](protocol/README.md), and [known limitations](docs/PRODUCT.md#whats-true-today). For help or feedback, write to [hey@october.dev](mailto:hey@october.dev).
 

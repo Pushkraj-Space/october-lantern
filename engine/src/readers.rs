@@ -6,7 +6,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::UNIX_EPOCH;
 
 use serde_json::Value;
@@ -61,13 +60,7 @@ pub mod opencode {
         if !db.exists() {
             return Vec::new();
         }
-        let uri = format!("file:{}?mode=ro", db.display());
-        let out =
-            crate::run::output(Command::new("/usr/bin/sqlite3").args(["-json", "-readonly", &uri, sql]), std::time::Duration::from_secs(3));
-        match out {
-            Ok(o) if o.status.success() => serde_json::from_slice(&o.stdout).unwrap_or_default(),
-            _ => Vec::new(),
-        }
+        crate::sqlite::query(&db, sql).unwrap_or_default()
     }
 
     /// The session a process in `cwd` is working in: the top-level session there with the most

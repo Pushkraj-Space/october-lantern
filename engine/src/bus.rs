@@ -37,6 +37,10 @@ struct Pin {
 }
 
 fn pin() -> Option<Pin> {
+    // The legacy manifest contains macOS binaries only. Never run one on Linux.
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
     let v: serde_json::Value = serde_json::from_str(include_str!("../bus.json")).ok()?;
     let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
     Some(Pin {
@@ -57,17 +61,48 @@ pub fn binary() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("LANTERN_BUS_BIN").map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
     }
+    // Linux and Windows packages carry a native build from the same pinned source as the Mac
+    // package. On Windows it runs from Lantern's own copy, named by commit like the Mac download,
+    // so the daemon and agents' Bus connections never hold the installed app's files.
+    if cfg!(windows) {
+        return windows_copy().filter(|p| p.is_file());
+    }
+    if cfg!(target_os = "linux") {
+        return bundled();
+    }
     installed_path().filter(|p| p.is_file())
 }
 
 /// Downloads the pinned Bus for this Mac if it isn't here yet, and checks it before keeping it.
+/// The build that came with the app, next to the engine (Linux and Windows).
+fn bundled() -> Option<PathBuf> {
+    let name = format!("october-bus{}", std::env::consts::EXE_SUFFIX);
+    std::env::current_exe().ok().map(|p| p.with_file_name(name)).filter(|p| p.is_file())
+}
+
+/// Where Windows keeps its copy of the bundled build.
+fn windows_copy() -> Option<PathBuf> {
+    let v: serde_json::Value = serde_json::from_str(include_str!("../bus.json")).ok()?;
+    let commit = v["commit"].as_str()?;
+    Some(support_dir().join(format!("bin/october-bus-{}.exe", &commit[..7.min(commit.len())])))
+}
+
 pub fn ensure_installed() -> Result<PathBuf> {
     static LOCK: Mutex<()> = Mutex::new(());
     let _guard = LOCK.lock().unwrap();
     if let Some(p) = binary() {
         return Ok(p);
     }
-    let pin = pin().context("this build has no October Bus to download")?;
+    if cfg!(windows) {
+        let source = bundled().context("this copy of Lantern has no October Bus; rebuild it with scripts/build-bus-windows.ps1")?;
+        let dest = windows_copy().context("no install path")?;
+        std::fs::create_dir_all(dest.parent().context("no folder")?)?;
+        let tmp = dest.with_extension("new");
+        std::fs::copy(&source, &tmp)?;
+        std::fs::rename(&tmp, &dest)?;
+        return Ok(dest);
+    }
+    let pin = pin().context("no pinned October Bus build for this OS; set LANTERN_BUS_BIN to a native october-bus binary")?;
     let dest = installed_path().context("no install path")?;
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(120))).build().into();
     let mut resp = agent.get(&pin.url).call().context("downloading October Bus")?;
@@ -88,9 +123,8 @@ pub fn ensure_installed() -> Result<PathBuf> {
         if !out.status.success() {
             bail!("couldn't unpack October Bus");
         }
-        use std::os::unix::fs::PermissionsExt;
         let bin = work.join("october-bus");
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))?;
+        crate::platform::set_mode(&bin, 0o755)?;
         std::fs::rename(&bin, &dest)?;
         Ok(())
     })();
@@ -126,16 +160,19 @@ pub fn ensure_ready() -> Result<()> {
     let running = |_: ()| bus(&["status"], Duration::from_secs(3)).is_ok_and(|o| o.status.success());
     if !running(()) {
         let bin = binary().context("October Bus isn't downloaded yet")?;
+        std::fs::create_dir_all(support_dir())?;
         let log = std::fs::File::create(support_dir().join("october-bus.log")).ok();
-        use std::os::unix::process::CommandExt;
         let mut cmd = Command::new(bin);
-        cmd.arg("start").stdin(Stdio::null()).process_group(0);
+        crate::platform::detach(cmd.arg("start").stdin(Stdio::null()));
         match log {
             Some(f) => cmd.stdout(f.try_clone()?).stderr(f),
             None => cmd.stdout(Stdio::null()).stderr(Stdio::null()),
         };
         // Runs on its own, outliving the engine; the next engine finds it through its run file.
-        cmd.spawn().context("starting October Bus")?;
+        let mut child = cmd.spawn().context("starting October Bus")?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
         let deadline = Instant::now() + Duration::from_secs(8);
         while !running(()) {
             if Instant::now() >= deadline {
@@ -153,6 +190,12 @@ pub fn ensure_ready() -> Result<()> {
     }
     *READY.lock().unwrap() = Some(Instant::now());
     Ok(())
+}
+
+/// One word of an agent's command line. Unix launches go through the login shell, so words are
+/// quoted for it; Windows launches pass each word as its own argument, untouched.
+fn word(s: &str) -> String {
+    if cfg!(windows) { s.to_string() } else { quote(s) }
 }
 
 /// How one launch joins the Bus: arguments for the agent, environment, or a wrapper command.
@@ -196,7 +239,7 @@ pub fn attach(kind: Kind, id: &str, name: &str) -> Result<Attach> {
         Kind::Claude => {
             let file = dir.join(format!("{id}.mcp.json"));
             generate("claude-code", &file)?;
-            a.args = vec!["--mcp-config".into(), quote(&file.to_string_lossy())];
+            a.args = vec!["--mcp-config".into(), word(&file.to_string_lossy())];
         }
         Kind::Codex => {
             // Codex takes config overrides as TOML values.
@@ -208,7 +251,7 @@ pub fn attach(kind: Kind, id: &str, name: &str) -> Result<Attach> {
                 "mcp_servers.october_bus.startup_timeout_sec=20".to_string(),
             ] {
                 a.args.push("-c".into());
-                a.args.push(quote(&kv));
+                a.args.push(word(&kv));
             }
         }
         Kind::Opencode => {
@@ -219,13 +262,14 @@ pub fn attach(kind: Kind, id: &str, name: &str) -> Result<Attach> {
         Kind::Copilot => {
             let file = dir.join(format!("{id}.copilot.json"));
             generate("copilot-cli", &file)?;
-            a.args = vec!["--additional-mcp-config".into(), quote(&format!("@{}", file.to_string_lossy()))];
+            a.args = vec!["--additional-mcp-config".into(), word(&format!("@{}", file.to_string_lossy()))];
         }
         Kind::Gemini | Kind::Qwen => {
-            let (host, var, system) = if kind == Kind::Gemini {
-                ("gemini-cli", "GEMINI_CLI_SYSTEM_SETTINGS_PATH", "/Library/Application Support/GeminiCli/settings.json")
-            } else {
-                ("qwen-code", "QWEN_CODE_SYSTEM_SETTINGS_PATH", "/Library/Application Support/QwenCode/settings.json")
+            let (host, var, system) = match (kind == Kind::Gemini, cfg!(windows)) {
+                (true, false) => ("gemini-cli", "GEMINI_CLI_SYSTEM_SETTINGS_PATH", "/Library/Application Support/GeminiCli/settings.json"),
+                (true, true) => ("gemini-cli", "GEMINI_CLI_SYSTEM_SETTINGS_PATH", r"C:\ProgramData\gemini-cli\settings.json"),
+                (false, false) => ("qwen-code", "QWEN_CODE_SYSTEM_SETTINGS_PATH", "/Library/Application Support/QwenCode/settings.json"),
+                (false, true) => ("qwen-code", "QWEN_CODE_SYSTEM_SETTINGS_PATH", r"C:\ProgramData\qwen-code\settings.json"),
             };
             let file = dir.join(format!("{id}.{host}.json"));
             generate(host, &file)?;
@@ -236,14 +280,15 @@ pub fn attach(kind: Kind, id: &str, name: &str) -> Result<Attach> {
             a.env.push((var.into(), file.to_string_lossy().into_owned()));
         }
         Kind::Goose => {
-            // `goose session --with-extension '<command>'`, the command in one shell-quoted string.
+            // `goose session --with-extension '<command>'`, the command in one string Goose splits
+            // the way a shell would.
             let mut words = vec![quote(&bin)];
             words.extend(mcp_args(id, name).iter().map(|w| quote(w)));
-            a.args = vec!["session".into(), "--with-extension".into(), quote(&words.join(" "))];
+            a.args = vec!["session".into(), "--with-extension".into(), word(&words.join(" "))];
         }
         Kind::October => {
-            a.wrap = vec![quote(&bin), "agent".into(), "run".into(), "--scope".into(), SCOPE.into(), "--id".into(), quote(id)];
-            a.wrap.extend(["--name".into(), quote(name), "--".into()]);
+            a.wrap = vec![word(&bin), "agent".into(), "run".into(), "--scope".into(), SCOPE.into(), "--id".into(), word(id)];
+            a.wrap.extend(["--name".into(), word(name), "--".into()]);
         }
         _ => bail!("October Bus isn't set up for this agent yet"),
     }
@@ -275,7 +320,7 @@ fn toml_string(s: &str) -> String {
 /// The line the agent's first message gets, so it knows it has teammates.
 pub fn note(name: &str) -> String {
     format!(
-        "You're connected to October Bus as \"{name}\", together with the other agents Lantern started on this Mac. \
+        "You're connected to October Bus as \"{name}\", together with the other agents Lantern started on this computer. \
          Use its tools (list_peers, message_peer, check_inbox, and the task tools) to coordinate with them, and check \
          your inbox when you finish a step."
     )

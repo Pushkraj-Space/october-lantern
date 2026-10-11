@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::launch::{program, shell};
+use crate::launch::program;
+#[cfg(unix)]
+use crate::launch::shell;
 use crate::model::Kind;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -87,6 +89,15 @@ fn known(kind: Kind) -> Vec<Model> {
 }
 
 /// Runs `<agent> <args>` in the user's login shell, with a time limit.
+#[cfg(windows)]
+fn ask(kind: Kind, args: &str) -> Option<String> {
+    let bin = crate::platform::find_on_path(program(kind))?;
+    let out = crate::run::output(Command::new(bin).args(args.split_whitespace()), Duration::from_secs(20)).ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Runs `<agent> <args>` in the user's login shell, with a time limit.
+#[cfg(unix)]
 fn ask(kind: Kind, args: &str) -> Option<String> {
     let script = format!("{} {args} 2>/dev/null", program(kind));
     let out = crate::run::output(Command::new(shell()).args(["-lic", &script]), Duration::from_secs(20)).ok()?;

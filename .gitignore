@@ -11,3 +11,9 @@
 
 # Private notes, migrations and infrastructure docs (never pushed)
 /_internal/
+
+desktop/target/
+
+# October (generated — context bus / browser MCP)
+.codex/config.toml
+.codex/hooks.json

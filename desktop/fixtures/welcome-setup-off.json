@@ -1,0 +1,11 @@
+{
+  "surface": "welcome",
+  "nowMs": 1790000000000,
+  "home": "C:\\Users\\me",
+  "model": {
+    "system": {"hooks": {"claude": "off", "codex": "off"}, "hooks_error": "Couldn't back up ~/.claude/settings.json: permission denied", "notifications_allowed": false},
+    "prefs": {"open_at_login": false, "notifications": true},
+    "caps": {"platform": "windows", "global_hotkeys": true}
+  },
+  "view": {"welcome_step": 1}
+}

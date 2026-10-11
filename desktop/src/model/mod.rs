@@ -1,0 +1,814 @@
+//! Lantern's domain state, mirroring the Mac app's `AppModel` (macos/Sources/OctoberLantern).
+//! `ui/` reads it through `&Model` and never mutates it; every change goes through
+//! `app::Lantern::apply`. Engine payloads are typed here (see protocol/README.md).
+
+pub mod drafts;
+pub mod inbox;
+pub mod inputs;
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+pub use drafts::Drafts;
+pub use inbox::Inbox;
+pub use inputs::Inputs;
+
+pub type AgentId = String;
+
+/// The harness an agent runs on. Open-ended, so a newer engine can report one this app doesn't know.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AgentKind(pub String);
+
+impl AgentKind {
+    pub const OCTOBER: &str = "october";
+    pub const CLAUDE: &str = "claude";
+    pub const CODEX: &str = "codex";
+    /// Every agent Lantern supports, in the order New Session lists them.
+    pub const SUPPORTED: [&str; 17] = [
+        "claude", "codex", "gemini", "opencode", "pi", "october", "grok", "cursor", "copilot", "qwen", "goose", "aider", "amp", "kimi",
+        "droid", "crush", "auggie",
+    ];
+    pub fn new(kind: &str) -> Self {
+        Self(kind.to_string())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn display_name(&self) -> String {
+        match self.0.as_str() {
+            "claude" => "Claude Code",
+            "codex" => "Codex",
+            "opencode" => "OpenCode",
+            "pi" => "Pi",
+            "gemini" => "Gemini CLI",
+            "grok" => "Grok",
+            "cursor" => "Cursor",
+            "qwen" => "Qwen Code",
+            "goose" => "Goose",
+            "aider" => "Aider",
+            "amp" => "Amp",
+            "copilot" => "Copilot",
+            "kimi" => "Kimi",
+            "droid" => "Droid",
+            "crush" => "Crush",
+            "auggie" => "Auggie",
+            "october" => "October",
+            other => return capitalized(other),
+        }
+        .to_string()
+    }
+    /// Where to get an agent that isn't installed.
+    pub fn website(&self) -> Option<&'static str> {
+        Some(match self.0.as_str() {
+            "claude" => "https://code.claude.com/docs",
+            "codex" => "https://github.com/openai/codex",
+            "gemini" => "https://github.com/google-gemini/gemini-cli",
+            "opencode" => "https://opencode.ai",
+            "pi" => "https://github.com/earendil-works/pi",
+            "october" => "https://github.com/october-dev/october-harness",
+            "grok" => "https://x.ai",
+            "cursor" => "https://cursor.com/cli",
+            "copilot" => "https://github.com/github/copilot-cli",
+            "qwen" => "https://github.com/QwenLM/qwen-code",
+            "goose" => "https://github.com/block/goose",
+            "aider" => "https://aider.chat",
+            "amp" => "https://ampcode.com",
+            "kimi" => "https://github.com/MoonshotAI/kimi-cli",
+            "droid" => "https://factory.ai",
+            "crush" => "https://github.com/charmbracelet/crush",
+            "auggie" => "https://www.augmentcode.com",
+            _ => return None,
+        })
+    }
+}
+
+/// Swift's `String.capitalized` for one word: first letter upper, the rest lower.
+fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars.flat_map(char::to_lowercase)).collect()).unwrap_or_default()
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentState {
+    Working,
+    Waiting,
+    Idle,
+    NeedsInput,
+    /// Also any state a newer engine reports that this app doesn't know.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl AgentState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Working => "Working",
+            Self::Waiting => "Your turn",
+            Self::NeedsInput => "Needs you",
+            Self::Idle => "Idle",
+            Self::Unknown => "Running",
+        }
+    }
+    /// Waiting on the person, so it belongs in the inbox.
+    pub fn wants_you(self) -> bool {
+        matches!(self, Self::Waiting | Self::NeedsInput)
+    }
+    /// Order in the agent list: needs you, your turn, working, the rest.
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::NeedsInput => 0,
+            Self::Waiting => 1,
+            Self::Working => 2,
+            Self::Idle | Self::Unknown => 3,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HostApp {
+    pub app: String,
+    pub pid: i64,
+    pub bundle_path: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TmuxPane {
+    pub socket: Option<String>,
+    pub target: String,
+    pub pane_id: String,
+}
+
+/// How Lantern types into an agent: tmux, cmux, terminal, iterm, october, pty (Lantern's own
+/// session on Windows) or none.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Route {
+    pub via: String,
+    /// The Lantern session name, for `pty`.
+    pub session: Option<String>,
+}
+
+impl Route {
+    /// Single keys (e.g. "1" to allow a permission prompt) can be sent without Enter.
+    pub fn sends_keys(&self) -> bool {
+        matches!(self.via.as_str(), "tmux" | "cmux" | "iterm" | "pty" | "console")
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Agent {
+    /// `<kind>:<pid>:<start time>`; a reused pid is a different agent.
+    pub id: AgentId,
+    pub kind: AgentKind,
+    pub handle: String,
+    pub pid: i64,
+    pub tty: Option<String>,
+    pub cwd: Option<String>,
+    pub project: Option<String>,
+    pub title: Option<String>,
+    pub session_id: Option<String>,
+    pub state: AgentState,
+    /// Milliseconds since the epoch.
+    pub state_since: Option<f64>,
+    pub last_message: Option<String>,
+    pub question: Option<String>,
+    /// "permission" at a tool permission prompt (`1` allows once, Escape declines); "other" otherwise.
+    pub question_kind: Option<String>,
+    pub question_detail: Option<String>,
+    /// Identifies one permission prompt; Allow/Deny carry it so they can't answer a different one.
+    pub prompt_id: Option<String>,
+    /// "exact", "guessed", "ambiguous" (state and history hidden) or "none".
+    pub session_match: Option<String>,
+    /// The app a session belongs to when it isn't a terminal ("Claude Desktop", "Codex app").
+    pub source: Option<String>,
+    pub live: Option<bool>,
+    pub host: Option<HostApp>,
+    pub tmux: Option<TmuxPane>,
+    pub can_reply: bool,
+    pub route: Option<Route>,
+    pub state_source: String,
+}
+
+impl Agent {
+    pub fn is_permission_prompt(&self) -> bool {
+        self.state == AgentState::NeedsInput && self.question_kind.as_deref() == Some("permission") && self.prompt_id.is_some()
+    }
+    /// Allow/Deny can be answered with a keypress.
+    pub fn can_answer_permission(&self) -> bool {
+        self.is_permission_prompt() && self.route.as_ref().is_some_and(Route::sends_keys)
+    }
+    pub fn is_live(&self) -> bool {
+        self.live.unwrap_or(true)
+    }
+    pub fn session_ambiguous(&self) -> bool {
+        self.session_match.as_deref() == Some("ambiguous")
+    }
+    /// Identifies one turn, so dismissing it doesn't hide the next one: `id@stateSince`.
+    pub fn turn_key(&self) -> String {
+        format!("{}@{}", self.id, self.state_since.unwrap_or(0.0) as i64)
+    }
+    /// `cwd` with the home folder shown as `~`.
+    pub fn short_cwd(&self, home: &str) -> Option<String> {
+        let cwd = self.cwd.as_deref()?;
+        Some(match cwd.strip_prefix(home) {
+            Some(rest) if !home.is_empty() => format!("~{rest}"),
+            _ => cwd.to_string(),
+        })
+    }
+    /// Where the agent lives, for display: "cmux", "tmux t1:0.0", "Windows Terminal", …
+    pub fn location(&self) -> Option<String> {
+        if let Some(source) = &self.source {
+            return Some(source.clone());
+        }
+        if let Some(tmux) = &self.tmux {
+            return Some(format!("tmux {}", tmux.target));
+        }
+        self.host.as_ref().map(|host| host.app.clone())
+    }
+    /// The Lantern session this agent runs in, if Lantern started it: a tmux session on Linux
+    /// (`session:window.pane`) or a ConPTY session on Windows.
+    pub fn in_session(&self, session: &str) -> bool {
+        self.tmux.as_ref().is_some_and(|tmux| tmux.target.starts_with(&format!("{session}:")))
+            || self.route.as_ref().is_some_and(|route| route.via == "pty" && route.session.as_deref() == Some(session))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    #[default]
+    Agent,
+    Tool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChatMessage {
+    pub role: Role,
+    pub text: String,
+    pub at: Option<String>,
+}
+
+/// The open conversation (list modes only).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Chat {
+    pub agent_id: AgentId,
+    pub messages: Vec<ChatMessage>,
+    pub supported: bool,
+    pub loading: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PanelMode {
+    Inbox,
+    Agents,
+    NewSession,
+    October,
+    Assistant,
+}
+
+impl PanelMode {
+    /// The inbox and agent list share tabs and chats; the others are standalone.
+    pub fn is_list(self) -> bool {
+        matches!(self, Self::Inbox | Self::Agents)
+    }
+}
+
+/// A session starting in Lantern, shown as its conversation right away.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LaunchPreview {
+    pub kind: AgentKind,
+    pub prompt: String,
+    pub folder: String,
+    /// Why it couldn't start.
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelOption {
+    pub id: String,
+    pub label: String,
+    pub group: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelList {
+    pub choosable: bool,
+    pub models: Vec<ModelOption>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HarnessState {
+    #[default]
+    Missing,
+    Installing,
+    Ready,
+    Failed,
+}
+
+/// October Harness (engine/src/harness.rs).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HarnessStatus {
+    pub status: HarnessState,
+    /// "path" (the user's own `october`) or "bundled".
+    pub source: Option<String>,
+    pub version: Option<String>,
+    pub message: Option<String>,
+}
+
+/// The app the person was in when they opened New Session or Point & Ask.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppContext {
+    /// Display name ("DaVinci Resolve").
+    pub name: String,
+    /// Bundle id / executable name, for per-app task folders.
+    pub id: String,
+    pub is_terminal: bool,
+    pub window: Option<String>,
+    pub document: Option<PathBuf>,
+    pub url: Option<String>,
+    pub selected_text: Option<String>,
+    /// Pid of a foreground terminal (Point & Ask recipient guess).
+    pub pid: Option<i64>,
+    /// The app's icon as a PNG Lantern saved (the "Work on <app>" row), when the app provides one.
+    pub icon: Option<PathBuf>,
+}
+
+impl AppContext {
+    /// The text added to the agent's first message for a Task (Swift `AppContext.Target.summary`),
+    /// naming this computer the way the platform does.
+    pub fn summary(&self, platform: Platform) -> String {
+        let computer = match platform {
+            Platform::Windows => "this Windows PC",
+            Platform::Linux => "this Linux computer",
+        };
+        let mut lines = vec![format!("I'm working in {} on {computer}.", self.name)];
+        if let Some(window) = self.window.as_deref().filter(|window| !window.is_empty()) {
+            lines.push(format!("Its front window is \"{window}\"."));
+        }
+        if let Some(document) = &self.document {
+            lines.push(format!("The open document is {}.", document.display()));
+        }
+        lines.join(" ")
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Capture {
+    #[default]
+    None,
+    Capturing,
+    Ready {
+        path: PathBuf,
+    },
+    Failed {
+        message: String,
+    },
+    /// The system needs the person to allow screen capture first.
+    PermissionNeeded,
+}
+
+/// New Session: what the engine and the system told us. The form itself is `Inputs::new_session`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NewSessionModel {
+    /// Installed agents, most recently used first; `None` until the engine has checked.
+    pub installed: Option<Vec<AgentKind>>,
+    /// "In Lantern" sessions are possible (tmux on Linux, ConPTY sessions on Windows).
+    pub in_lantern_available: bool,
+    /// Models by kind, once listed.
+    pub models: HashMap<String, ModelList>,
+    /// Folders to offer: recent and running ones (deduplicated, home omitted).
+    pub folders: Vec<String>,
+    /// The app a Task would be for (captured before the panel took focus).
+    pub task_app: Option<AppContext>,
+    pub screenshot: Capture,
+    pub launching: bool,
+    pub launch_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssistantTurn {
+    pub id: u64,
+    pub question: String,
+    pub answer: String,
+    pub failed: bool,
+    pub note: Option<String>,
+    /// "Started Claude Code in october-lantern", once a task from this answer launched.
+    pub started: Option<String>,
+}
+
+/// A task the answer asked Lantern to start, waiting out its cancel window.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PendingTask {
+    pub id: u64,
+    pub turn: u64,
+    pub prompt: String,
+    pub kind: AgentKind,
+    pub folder: String,
+    pub seconds_left: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssistantModel {
+    pub turns: Vec<AssistantTurn>,
+    pub asking: bool,
+    pub pending_task: Option<PendingTask>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AskTurn {
+    pub question: String,
+    pub answer: String,
+    pub failed: bool,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PointAskPhase {
+    #[default]
+    Closed,
+    /// The selection overlay is up.
+    Selecting,
+    /// The card is showing.
+    Card,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PointAskModel {
+    pub phase: PointAskPhase,
+    pub screenshot: Capture,
+    pub context: Option<AppContext>,
+    /// The agent "Send to" goes to.
+    pub recipient: Option<AgentId>,
+    pub turns: Vec<AskTurn>,
+    pub asking: bool,
+    pub sending: bool,
+    pub problem: Option<String>,
+    pub listening: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Account {
+    pub email: String,
+    pub plan: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AccountState {
+    pub signed_in: Option<Account>,
+    /// A browser or email sign-in is in progress.
+    pub pending: bool,
+    pub error: Option<String>,
+}
+
+/// The connection to October Desktop (engine/src/october_link.rs).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OctoberLink {
+    /// notInstalled | notRunning | readOnly | connected | pairing | error
+    pub status: String,
+    pub core_version: Option<String>,
+    pub paired: bool,
+    pub pairing_code: Option<String>,
+    pub message: Option<String>,
+    pub agent_count: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", content = "message", rename_all = "camelCase")]
+pub enum EngineHealth {
+    #[default]
+    Starting,
+    Ready,
+    Restarting,
+    /// Stopped for good, with the reason.
+    Failed(String),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Toast {
+    pub id: u64,
+    pub text: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Edge {
+    Left,
+    #[default]
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HookState {
+    #[default]
+    Off,
+    On,
+    NeedsUpdate,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub newer: bool,
+}
+
+/// What Settings shows besides the preferences themselves.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SystemState {
+    /// Claude Code and Codex hooks.
+    pub hooks: HashMap<String, HookState>,
+    pub hooks_error: Option<String>,
+    /// Installing or removing the hooks.
+    pub hooks_busy: bool,
+    /// `None` while unknown.
+    pub notifications_allowed: Option<bool>,
+    pub update: Option<UpdateInfo>,
+    pub checking_updates: bool,
+    pub version: String,
+    pub uninstall: Uninstall,
+}
+
+/// Uninstalling Lantern (Settings › About, after the person confirmed it; Swift `Support.uninstall`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Uninstall {
+    #[default]
+    Idle,
+    /// Signing out and removing hooks, support files, settings and desktop integrations.
+    Removing,
+    /// Some of that couldn't be removed; each entry says what, and how to remove it by hand. The
+    /// app is still in place: the person chooses to remove it anyway or keep it.
+    Partial { failures: Vec<String> },
+    /// The app itself couldn't be removed (or this copy isn't an installed one).
+    AppFailed { message: String },
+}
+
+/// Persisted preferences (Swift `Preferences` + window placement).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Prefs {
+    pub edge: Edge,
+    /// Top of the pill as a fraction of the work area's height, measured from the bottom.
+    pub pill_top: f32,
+    pub open_in_terminal: bool,
+    /// The agent Ask Lantern starts tasks with (no picker; routing only).
+    pub default_task_agent: String,
+    pub screenshot_new_sessions: bool,
+    pub bus_for_sessions: bool,
+    pub toolkit_in_sessions: bool,
+    pub notifications: bool,
+    pub notify_finished: bool,
+    /// Harnesses that don't count in Waiting, the badge or notifications.
+    pub muted: Vec<String>,
+    pub open_at_login: bool,
+    pub message_hotkey: String,
+    pub point_ask_hotkey: String,
+    pub automatic_updates: bool,
+    pub welcomed: bool,
+    /// Last model chosen per agent kind.
+    pub model_by_kind: HashMap<String, String>,
+    /// Last task folder per app id.
+    pub task_folder_by_app: HashMap<String, String>,
+    pub recent_folders: Vec<String>,
+    /// Agent kinds, most recently used first.
+    pub recent_kinds: Vec<String>,
+    /// Where Lantern was installed (the folder its app came from), so uninstalling can remove it
+    /// even when an update now runs from Lantern's data folder. Linux only; Windows asks its installer.
+    pub bundle: Option<String>,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            edge: Edge::Right,
+            pill_top: 0.72,
+            open_in_terminal: false,
+            default_task_agent: AgentKind::OCTOBER.into(),
+            screenshot_new_sessions: false,
+            bus_for_sessions: true,
+            // As Preferences.swift registers them: finishing notifies, the toolkit list is opt-in.
+            toolkit_in_sessions: false,
+            notifications: true,
+            notify_finished: true,
+            muted: Vec::new(),
+            open_at_login: false,
+            message_hotkey: "ctrl+alt+space".into(),
+            point_ask_hotkey: "ctrl+alt+p".into(),
+            automatic_updates: true,
+            welcomed: false,
+            model_by_kind: HashMap::new(),
+            task_folder_by_app: HashMap::new(),
+            recent_folders: Vec::new(),
+            recent_kinds: Vec::new(),
+            bundle: None,
+        }
+    }
+}
+
+/// Folders to offer for a new session (Swift `recentFolders`): ones you've used, then where agents
+/// are running (in rank order); no repeats, never the home folder, at most 8.
+pub fn offered_folders(prefs: &Prefs, agents: &[Agent], home: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    prefs
+        .recent_folders
+        .iter()
+        .cloned()
+        .chain(agents.iter().filter_map(|agent| agent.cwd.clone()))
+        .filter(|folder| folder != home && seen.insert(folder.clone()))
+        .take(8)
+        .collect()
+}
+
+/// Shortcuts Settings offers to message an agent (Swift `HotKeyPreset`): ⌃⌥Space, ⇧⌘Space and ⌃⌥L
+/// as Ctrl+Alt+Space, Ctrl+Shift+Space and Ctrl+Alt+L. The Mac's ⌥Space is left out: Alt+Space
+/// opens the window menu on GNOME and Windows (CONTRACT §8).
+pub const MESSAGE_HOTKEYS: [&str; 4] = ["ctrl+alt+space", "ctrl+shift+space", "ctrl+alt+l", "none"];
+/// Point & Ask shortcuts (Swift `PointAskPreset`: ⌃⌥P, ⌃⌥K, None).
+pub const POINT_ASK_HOTKEYS: [&str; 3] = ["ctrl+alt+p", "ctrl+alt+k", "none"];
+
+/// "ctrl+alt+space" → "Ctrl+Alt+Space" (menus, Welcome and Settings show shortcuts this way).
+pub fn hotkey_label(keys: &str) -> String {
+    if keys == "none" {
+        return "None".into();
+    }
+    keys.split('+')
+        .map(|part| {
+            let mut chars = part.chars();
+            chars.next().map_or(String::new(), |first| first.to_uppercase().chain(chars).collect())
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+impl Prefs {
+    /// Whether a harness counts in Waiting, the badge and notifications.
+    pub fn counts(&self, kind: &AgentKind) -> bool {
+        !self.muted.iter().any(|muted| muted == kind.as_str())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    #[default]
+    Linux,
+    Windows,
+}
+
+/// What this platform can do (CONTRACT §8), so the UI shows the right controls and copy.
+/// Everything not proven on a real machine stays `false` until it is.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Caps {
+    pub platform: Platform,
+    /// The edge pill (Linux: needs an X server).
+    pub edge_pill: bool,
+    pub backdrop_blur: bool,
+    /// The Mac's 6pt hover halo around the pill.
+    pub hover_halo: bool,
+    /// Point & Ask can pick a window under the pointer.
+    pub window_hit_test: bool,
+    pub foreground_app: bool,
+    pub document_context: bool,
+    pub url_context: bool,
+    pub selected_text: bool,
+    pub dictation: bool,
+    pub global_hotkeys: bool,
+    /// A tray host shows Lantern's status menu (GNOME needs the AppIndicator extension). Live.
+    pub tray: bool,
+}
+
+/// Everything the UI reads. Field names are frozen (CONTRACT §3); changes go through the bus.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Model {
+    pub panel: Option<PanelMode>,
+    /// Agents in rank order (needs you, your turn, working, the rest; not-live last).
+    pub agents: Vec<Agent>,
+    pub inbox: Inbox,
+    pub chat: Option<Chat>,
+    pub launch_preview: Option<LaunchPreview>,
+    /// A reply to the composer's recipient (`Inputs::drafts`) is on its way.
+    pub sending: bool,
+    pub assistant: AssistantModel,
+    pub new_session: NewSessionModel,
+    pub point_ask: PointAskModel,
+    pub account: AccountState,
+    pub october: Option<OctoberLink>,
+    pub harness: Option<HarnessStatus>,
+    pub engine: EngineHealth,
+    pub toast: Option<Toast>,
+    /// Bumped to move keyboard focus into the composer or the Ask box.
+    pub compose_focus: u64,
+    pub dictating: bool,
+    pub pill_expanded: bool,
+    pub system: SystemState,
+    pub prefs: Prefs,
+    pub caps: Caps,
+}
+
+impl Model {
+    pub fn agent(&self, id: &str) -> Option<&Agent> {
+        self.agents.iter().find(|agent| agent.id == id)
+    }
+    pub fn chat_agent(&self) -> Option<&Agent> {
+        self.chat.as_ref().and_then(|chat| self.agent(&chat.agent_id))
+    }
+    pub fn badge(&self) -> usize {
+        self.inbox.new.len()
+    }
+    pub fn any_working(&self) -> bool {
+        self.agents.iter().any(|agent| agent.state == AgentState::Working)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_an_engine_agent() {
+        let agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": "claude:42:1790180000", "kind": "claude", "handle": "claude-3", "pid": 42, "state": "needs_input",
+            "stateSince": 1790180000123u64, "questionKind": "permission", "promptId": "9f2c", "canReply": true,
+            "route": {"via": "pty", "session": "claude-proj-1"}, "stateSource": "hook", "exe": "ignored"
+        }))
+        .unwrap();
+        assert_eq!(agent.state, AgentState::NeedsInput);
+        assert_eq!(agent.turn_key(), "claude:42:1790180000@1790180000123");
+        assert!(agent.can_answer_permission());
+        assert!(agent.in_session("claude-proj-1") && !agent.in_session("claude-proj"));
+        assert!(agent.is_live());
+    }
+
+    #[test]
+    fn unknown_states_and_kinds_are_kept_open() {
+        let agent: Agent = serde_json::from_value(serde_json::json!({"id": "x", "kind": "newharness", "state": "thinking"})).unwrap();
+        assert_eq!(agent.state, AgentState::Unknown);
+        assert_eq!(agent.kind.display_name(), "Newharness");
+        assert_eq!(AgentState::Unknown.label(), "Running");
+    }
+
+    #[test]
+    fn task_context_names_the_app_window_and_document_per_platform() {
+        let context = AppContext {
+            name: "DaVinci Resolve".into(),
+            window: Some("video-3".into()),
+            document: Some("/home/me/video-3.drp".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            context.summary(Platform::Linux),
+            "I'm working in DaVinci Resolve on this Linux computer. Its front window is \"video-3\". The open document is /home/me/video-3.drp."
+        );
+        assert!(context.summary(Platform::Windows).contains("on this Windows PC."));
+    }
+
+    #[test]
+    fn offered_folders_put_used_ones_first_and_skip_home_and_repeats() {
+        let prefs = Prefs { recent_folders: vec!["/p/a".into(), "/home/me".into()], ..Default::default() };
+        let agent = |cwd: &str| Agent { cwd: Some(cwd.into()), ..Default::default() };
+        let agents: Vec<Agent> = ["/p/b", "/p/a", "/home/me"].into_iter().chain((0..10).map(|_| "/p/c")).map(agent).collect();
+        assert_eq!(offered_folders(&prefs, &agents, "/home/me"), ["/p/a", "/p/b", "/p/c"]);
+        let many: Vec<Agent> = (0..12).map(|n| agent(&format!("/p/{n}"))).collect();
+        assert_eq!(offered_folders(&Prefs::default(), &many, "/home/me").len(), 8);
+    }
+
+    #[test]
+    fn tmux_sessions_match_by_target_prefix() {
+        let agent = Agent { tmux: Some(TmuxPane { target: "codex-proj-1:0.0".into(), ..Default::default() }), ..Default::default() };
+        assert!(agent.in_session("codex-proj-1"));
+        assert!(!agent.in_session("codex-proj"));
+    }
+}

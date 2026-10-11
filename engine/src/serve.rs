@@ -433,9 +433,13 @@ pub fn run() -> Result<()> {
                     }
                 },
                 Ok(Request::Attach { request_id, agent_id }) => {
-                    let result = match agents.iter().find(|a| a.id == agent_id).and_then(|a| a.tmux.as_ref()) {
-                        Some(pane) => launch::attach_in_terminal(pane).map_err(|e| format!("{e:#}")),
-                        None => Err("agent is not in a tmux session".to_string()),
+                    let result = match agents.iter().find(|a| a.id == agent_id) {
+                        Some(a) if a.tmux.is_some() => launch::attach_in_terminal(a.tmux.as_ref().unwrap()).map_err(|e| format!("{e:#}")),
+                        // A Lantern session (Windows): its window, or a new one.
+                        Some(a) if matches!(a.route, crate::model::Route::Pty { .. }) => {
+                            crate::deliver::focus(a).map_err(|e| format!("{e:#}"))
+                        }
+                        _ => Err("agent is not in a tmux session".to_string()),
                     };
                     emit(&json!({"type": "attachResult", "requestId": request_id, "ok": result.is_ok(), "message": result.err()}));
                 }

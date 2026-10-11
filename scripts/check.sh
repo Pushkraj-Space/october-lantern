@@ -13,15 +13,31 @@ if ! command -v cargo >/dev/null; then
   done
 fi
 
+if [[ "$(uname -s)" == Linux ]]; then
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/build/target}"
+fi
+
 echo "==> engine"
 (cd "$ROOT/engine" && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
 
-echo "==> app"
-(cd "$ROOT/macos" && swift build)
-if grep -q testTarget "$ROOT/macos/Package.swift"; then
-  (cd "$ROOT/macos" && swift test)
-fi
+case "$(uname -s)" in
+  Darwin)
+    echo "==> macOS app"
+    (cd "$ROOT/macos" && swift build)
+    if grep -q testTarget "$ROOT/macos/Package.swift"; then
+      (cd "$ROOT/macos" && swift test)
+    fi
+    ;;
+  Linux)
+    echo "==> Rust desktop"
+    (cd "$ROOT/desktop" && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
+    ;;
+  *) echo "Unsupported host OS" >&2; exit 1 ;;
+esac
 
 echo "==> scripts"
 for s in "$ROOT"/scripts/*.sh; do bash -n "$s"; done
+if [[ "$(uname -s)" == Linux ]] && command -v node >/dev/null; then
+  node --check "$ROOT/linux/gnome-extension/extension.js"
+fi
 echo "==> checks passed"

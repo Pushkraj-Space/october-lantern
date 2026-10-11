@@ -1,4 +1,4 @@
-//! A short list of what this Mac already has (tools, apps, local models, hardware), kept in
+//! A short list of what this computer already has (tools, apps, local models, hardware), kept in
 //! `toolkit.md` in Lantern's support folder and given to agents Lantern starts, so they use what's
 //! here instead of installing it again.
 //!
@@ -10,6 +10,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use crate::hooks::support_dir;
+#[cfg(unix)]
 use crate::launch::shell;
 use crate::transcripts::home;
 
@@ -36,7 +37,7 @@ pub fn refresh_if_stale() {
     }
 }
 
-/// Scans the Mac and rewrites the list, keeping the user's notes.
+/// Scans this computer and rewrites the list, keeping the user's notes.
 pub fn refresh() -> anyhow::Result<PathBuf> {
     let notes = std::fs::read_to_string(path()).ok().and_then(|t| notes_of(&t).map(String::from)).unwrap_or_default();
     let body = render(&scan(), &notes);
@@ -64,7 +65,7 @@ pub fn notes_of(text: &str) -> Option<&str> {
 pub fn render(found: &Found, notes: &str) -> String {
     let today = crate::model::iso(crate::hooks::now_ms());
     let mut out = format!(
-        "# Tools on this Mac\n\nKept by October Lantern and given to agents it starts, so they use what's already here \
+        "# Tools on this computer\n\nKept by October Lantern and given to agents it starts, so they use what's already here \
          instead of installing it again. Updated {}. Lantern rewrites everything above the notes heading; what you write under \
          it is kept.\n\n",
         &today[..10.min(today.len())]
@@ -101,6 +102,7 @@ const TOOLS: &[(&str, &[&str])] = &[
 ];
 
 /// Apps agents can script or drive, with where their scripting lives when it isn't obvious.
+#[cfg(target_os = "macos")]
 const APPS: &[(&str, &str)] = &[
     ("DaVinci Resolve", "scripting API in /Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting"),
     ("Blender", "Python: Blender.app/Contents/MacOS/Blender --background --python script.py"),
@@ -146,7 +148,14 @@ pub(crate) fn scan() -> Found {
     found
 }
 
+/// Which of these programs are on `PATH`.
+#[cfg(windows)]
+fn on_path<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
+    names.filter(|n| crate::platform::find_on_path(n).is_some()).map(String::from).collect()
+}
+
 /// Which of these programs the user's login shell can run.
+#[cfg(unix)]
 fn on_path<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
     let names: Vec<&str> = names.collect();
     let script = format!("for c in {}; do command -v \"$c\" >/dev/null 2>&1 && echo \"$c\"; done", names.join(" "));
@@ -155,6 +164,7 @@ fn on_path<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(target_os = "macos")]
 fn machine() -> Option<String> {
     let sysctl = |key: &str| {
         crate::run::output(Command::new("/usr/sbin/sysctl").args(["-n", key]), Duration::from_secs(3))
@@ -170,10 +180,50 @@ fn machine() -> Option<String> {
     Some(format!("{chip}{}{}", memory.unwrap_or_default(), os.unwrap_or_default()))
 }
 
+#[cfg(target_os = "linux")]
+fn machine() -> Option<String> {
+    let cpu = std::fs::read_to_string("/proc/cpuinfo")
+        .ok()
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                line.strip_prefix("model name").and_then(|line| line.split_once(':')).map(|(_, value)| value.trim().to_owned())
+            })
+        })
+        .unwrap_or_else(|| std::env::consts::ARCH.into());
+    let memory = std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                line.strip_prefix("MemTotal:").and_then(|value| value.split_whitespace().next()).and_then(|value| value.parse::<u64>().ok())
+            })
+        })
+        .map(|kb| format!(", {} GB memory", kb / (1024 * 1024)))
+        .unwrap_or_default();
+    Some(format!("{cpu}{memory}, {}", sysinfo::System::long_os_version().unwrap_or_else(|| "Linux".into())))
+}
+
+#[cfg(windows)]
+fn machine() -> Option<String> {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_cpu_list(sysinfo::CpuRefreshKind::nothing());
+    sys.refresh_memory();
+    let cpu =
+        sys.cpus().first().map(|c| c.brand().trim().to_string()).filter(|b| !b.is_empty()).unwrap_or_else(|| std::env::consts::ARCH.into());
+    let memory = format!(", {} GB memory", sys.total_memory() / (1 << 30));
+    Some(format!("{cpu}{memory}, {}", sysinfo::System::long_os_version().unwrap_or_else(|| "Windows".into())))
+}
+
 /// Ollama models, whisper.cpp model files, Hugging Face and LM Studio downloads.
 fn models(ollama: bool) -> Vec<String> {
     let mut out = Vec::new();
-    if ollama && let Ok(o) = crate::run::output(Command::new(shell()).args(["-lic", "ollama list 2>/dev/null"]), Duration::from_secs(10)) {
+    #[cfg(unix)]
+    let list_ollama = || crate::run::output(Command::new(shell()).args(["-lic", "ollama list 2>/dev/null"]), Duration::from_secs(10));
+    #[cfg(windows)]
+    let list_ollama = || {
+        let bin = crate::platform::find_on_path("ollama").ok_or_else(|| anyhow::anyhow!("ollama isn't on PATH"))?;
+        crate::run::output(Command::new(bin).arg("list"), Duration::from_secs(10))
+    };
+    if ollama && let Ok(o) = list_ollama() {
         let names: Vec<String> = String::from_utf8_lossy(&o.stdout)
             .lines()
             .skip(1)
@@ -220,6 +270,7 @@ fn models(ollama: bool) -> Vec<String> {
 }
 
 /// Notable apps in /Applications (and one folder down, where some apps live), and ~/Applications.
+#[cfg(target_os = "macos")]
 fn apps() -> Vec<String> {
     let home = home();
     let roots = [PathBuf::from("/Applications"), home.join("Applications")];
@@ -242,10 +293,58 @@ fn apps() -> Vec<String> {
         .collect()
 }
 
+#[cfg(target_os = "linux")]
+fn apps() -> Vec<String> {
+    let mut roots = vec![crate::platform::data_dir("october-lantern").parent().unwrap_or(Path::new("/usr/share")).join("applications")];
+    roots.extend(
+        std::env::var("XDG_DATA_DIRS")
+            .unwrap_or_else(|_| "/usr/local/share:/usr/share".into())
+            .split(':')
+            .filter(|dir| !dir.is_empty())
+            .map(|dir| PathBuf::from(dir).join("applications")),
+    );
+    let mut apps: Vec<String> = roots
+        .iter()
+        .flat_map(|root| list(root))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "desktop"))
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .filter(|text| !text.lines().any(|line| line == "Hidden=true" || line == "NoDisplay=true"))
+        .filter_map(|text| text.lines().find_map(|line| line.strip_prefix("Name=").map(str::to_string)))
+        .collect();
+    apps.sort();
+    apps.dedup();
+    apps.truncate(60);
+    apps
+}
+
+/// Start menu shortcuts, for the user and for everyone.
+#[cfg(windows)]
+fn apps() -> Vec<String> {
+    let programs = Path::new("Microsoft").join("Windows").join("Start Menu").join("Programs");
+    let roots: Vec<PathBuf> =
+        ["APPDATA", "ProgramData"].iter().filter_map(std::env::var_os).map(|d| PathBuf::from(d).join(&programs)).collect();
+    let mut apps: Vec<String> = roots
+        .iter()
+        .flat_map(|root| {
+            let entries = list(root);
+            let nested: Vec<PathBuf> = entries.iter().filter(|e| e.is_dir()).flat_map(|d| list(d)).collect();
+            entries.into_iter().chain(nested)
+        })
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk")))
+        .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .filter(|name| !name.to_ascii_lowercase().contains("uninstall"))
+        .collect();
+    apps.sort();
+    apps.dedup();
+    apps.truncate(60);
+    apps
+}
+
 fn list(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir).map(|d| d.flatten().map(|e| e.path()).collect()).unwrap_or_default()
 }
 
+#[cfg(target_os = "macos")]
 fn stem(p: &Path) -> String {
     p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }

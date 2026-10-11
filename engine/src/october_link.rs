@@ -171,11 +171,10 @@ fn load_saved() -> Option<Saved> {
 }
 
 fn save(s: &Saved) {
-    use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::create_dir_all(support_dir());
     let path = saved_path();
     if std::fs::write(&path, serde_json::to_vec(s).unwrap_or_default()).is_ok() {
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        let _ = crate::platform::set_mode(&path, 0o600);
     }
 }
 

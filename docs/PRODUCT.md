@@ -2,6 +2,14 @@
 
 **A small glowing lantern on the edge of your screen that watches every AI coding agent on your Mac and lights up when one of them needs you.**
 
+**Platform scope:** the features below are the Mac app's (Swift). Linux and Windows run the same
+design and behaviour in Rust (`desktop/`, egui): the edge pill and its panel, Waiting and Your
+agents, chats and replies, New Session, Ask Lantern, Point & Ask, the October panel, Settings,
+Welcome, the tray menu, global shortcuts, notifications and local dictation, with the shared Rust
+engine. Where a platform can't do what the Mac does it does the closest thing and says so (no
+backdrop blur on GNOME; the pill runs through XWayland on Wayland; Point & Ask selects an area or
+the whole screen there). Windows is a preview. See the [build instructions](../README.md#linux-and-windows-rust).
+
 People now run several coding agents at once (Claude Code in one terminal, Codex in another, Pi or OpenCode in a third), and each one keeps stopping to say "done" or to ask something. The only way to find out is to click through every window. October Lantern sits on the edge of your screen, finds all of those agents by itself, shows which ones are waiting on you and what they said, and lets you answer them without hunting for the right window.
 
 Lantern is part of the **October** family. October Desktop is the flagship workspace for running teams of agents; `october-harness` and `october-bus` are its agent and messaging layers. Lantern is the small, free-standing entry point: a light download that's useful on its own, and will get more capable when October Desktop is installed (see [Roadmap](#roadmap)).
@@ -94,10 +102,10 @@ Lantern does **not** replace your terminals. Your agents keep running exactly wh
 4. Where to find everything.
 
 **Settings** (from the menu bar lantern) has four tabs:
-- **General:** open at login, which screen edge, the shortcut, automatic updates and the hooks.
-- **Notifications:** on or off, and whether finished turns notify too.
+- **General:** open at login, which screen edge, the two shortcuts and automatic updates; new sessions and tasks (screenshot, October Bus, the toolkit list); exact status (the hooks); notifications (on or off, and whether finished turns notify too).
 - **Agents:** which agents count toward Waiting and notifications.
-- **About:** version, check for updates, report a problem, the welcome guide, and uninstall.
+- **October:** the October account and October Desktop.
+- **About:** version, check for updates, anonymous usage counts (in builds that send them), report a problem, the welcome guide, and uninstall.
 
 **Menu bar.** A small lantern icon: Waiting, Agents, New Session or Task, Message an Agent, Show/Hide Lantern, Settings, Check for Updates, Report a Problem, Welcome Guide, Quit.
 
@@ -167,13 +175,14 @@ Lantern is in **beta (v0.4.3)**.
 | Sign in with an October account (Google, GitHub, Apple, email) | ✅ |
 | Connect to October Desktop | ✅ Read-only with any October version that runs october-core (lists October's terminals). Full connection (October's agent names and questions, replies through October's safe delivery, Open on the canvas) needs October 1.0.52 or later, after the user clicks Connect and allows Lantern in October. |
 | October phone app | ⚠️ Built, not yet tested against the real phone app and relay: sign in, then pair the phone by QR. Needs a plan that includes mobile. Lantern appears as its own computer on the October account. Treat as experimental until a live pairing and reply have been confirmed. |
-| Windows or Linux | ❌ Not yet |
+| Linux | ✅ The Mac app's pill and panel in Rust (egui) with the Rust engine: Waiting/Agents, chats, New Session (In Lantern via tmux), Ask Lantern, Point & Ask, October account and Desktop, Settings, tray menu (with an AppIndicator host), Ctrl+Alt+Space / Ctrl+Alt+P, notifications, local dictation, October Harness, updates. GNOME/Wayland via XWayland; no backdrop blur. |
+| Windows | ⚠️ Preview from source, with the same pill and panel as Linux. Finds agents in Windows Terminal, VS Code and console windows, shows state and conversations, brings the terminal window to the front; tray menu, notifications, Ctrl+Alt+Space / Ctrl+Alt+P, hooks, Credential Manager sign-in. Starts sessions in Lantern's own ConPTY sessions (shown in Windows Terminal or a console window) and replies and answers Allow/Deny there; agents started elsewhere are followed, not typed into. October Bus, screenshots of the display under the pointer, local dictation, in-app updates, and a per-user installer. Built and tested in CI; not yet tried by hand on Windows. |
 | Pricing | The core app is free forever. No account needed; signing in to October is optional. A paid October plan adds its extras, like cloud agents, automatically after sign-in. |
 
 ## Privacy
 
 - **Your code and conversations stay on your Mac unless you connect to October.** Without an October account, Lantern makes two kinds of network request: the daily update check (a public list of versions on GitHub), and anonymous usage counts (below).
-- **Anonymous usage counts (on by default, off in Settings › General or on the welcome screen).** Sent to PostHog (US), a few batched requests a day, so we can count daily and monthly users and see which features are used. Each event carries only its name, a random install id, the app version, the macOS version and the chip type, plus these details:
+- **Anonymous usage counts (on by default, off in Settings › About or on the welcome screen; macOS builds only: the Linux and Windows builds send none and don't show the setting).** Sent to PostHog (US), a few batched requests a day, so we can count daily and monthly users and see which features are used. Each event carries only its name, a random install id, the app version, the macOS version and the chip type, plus these details:
   - `lantern_active`, once a day: how many agents of each kind are running (e.g. 3 Claude Code, 1 Codex).
   - `reply_sent`, `reply_failed`, `reply_uncertain`, `reply_copied`: the agent's kind and how the reply was typed (tmux, cmux, Terminal…).
   - `permission_answered`: allow or deny, and the route.
@@ -345,6 +354,7 @@ scripts/publish.sh "Release notes in one paragraph"
 | Path | What |
 |---|---|
 | `engine/` | Rust engine: agent detection, session readers, hooks, delivery, launching |
+| `desktop/` | The Linux and Windows app (Rust, egui): the Mac app's pill and panel; uses the shared engine over stdio. |
 | `macos/` | Swift package for the macOS app. `Resources/` holds the app icon and logos. |
 | `protocol/` | The message protocol between the app and the engine |
 | `scripts/` | Build, release, publish and icon scripts |

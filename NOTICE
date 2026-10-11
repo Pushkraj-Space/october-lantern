@@ -8,6 +8,11 @@ Harness logo attribution is recorded in macos/Resources/harness/NOTICE.md.
 
 Lantern downloads October Bus (https://github.com/october-dev/october-bus), built from source,
 when it's first needed. October Bus is licensed under the Apache License, Version 2.0.
+Linux packages may bundle the same pinned October Bus source build.
+
+Optional local dictation uses whisper.cpp (https://github.com/ggml-org/whisper.cpp)
+under the MIT license, and OpenAI Whisper model weights under the MIT license.
+The installer keeps the whisper.cpp license beside its executable.
 
 October, Lantern, and the names and logos of supported agents identify their
 respective products. The Apache License does not grant rights to use trademarks,

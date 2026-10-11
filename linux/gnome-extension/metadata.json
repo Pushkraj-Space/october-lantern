@@ -1,0 +1,8 @@
+{
+  "uuid": "lantern@october.dev",
+  "name": "October Lantern",
+  "description": "A floating edge lantern for your AI agents. Requires the October Lantern Rust desktop app.",
+  "shell-version": ["49", "50"],
+  "url": "https://github.com/october-dev/october-lantern",
+  "version": 1
+}

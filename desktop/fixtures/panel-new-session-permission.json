@@ -1,0 +1,14 @@
+{
+  "surface": "panel", "maxHeight": 1032, "nowMs": 1790000000000, "home": "C:\\Users\\me", "reduceMotion": true,
+  "model": {
+    "panel": "newSession", "engine": {"state": "ready"}, "caps": {"platform": "windows"},
+    "new_session": {
+      "installed": ["codex", "claude"], "in_lantern_available": true,
+      "models": {"codex": {"choosable": true, "models": [{"id": "gpt-5.4", "label": "GPT-5.4", "group": "OpenAI"}]}},
+      "folders": ["C:\\Users\\me\\Projects\\october-lantern"],
+      "screenshot": {"state": "permissionNeeded"},
+      "launch_error": "The screenshot isn't ready. Retake it, or turn it off."
+    }
+  },
+  "inputs": {"new_session": {"kind": "codex", "screenshot": true, "open_in_terminal": true}}
+}

@@ -1,14 +1,20 @@
 # Contributing to October Lantern
 
-Thanks for helping. Lantern is a small macOS app (Swift, `macos/`) with a Rust engine (`engine/`)
+Thanks for helping. Lantern has a macOS app (Swift, `macos/`) and a Rust app for Linux and Windows (`desktop/`, the Mac app's design in egui) with a shared Rust engine (`engine/`)
 that finds your coding agents, reads their sessions and types replies for you.
 
 ## Build and check
 
-- macOS 14+, Xcode 26, Rust (stable), Go (only to build October Bus: `scripts/build-bus.sh`).
+- macOS: macOS 14+, Xcode 26, stable Rust. Linux: stable Rust, C compiler, Wayland/X11 and OpenGL runtimes; tmux for delivery. Go is only needed to build October Bus.
 - `scripts/check.sh` runs everything CI runs: `cargo fmt --check`, strict Clippy, the engine tests,
-  `swift build`, `swift test` and a syntax check of the scripts. Please run it before a PR.
-- `scripts/build-app.sh` builds `build/October Lantern.app` (ad-hoc signed without a Developer ID).
+  the current platform UI checks and a syntax check of the scripts. Please run it before a PR.
+- `scripts/build-app.sh` builds `build/October Lantern.app` on macOS (ad-hoc signed without a Developer ID), or the Rust UI and engine in `build/linux/` on Linux. Use `--debug` for development.
+- `python3 scripts/smoke-linux.py` exercises Linux discovery, replies and stale-target refusal in an isolated tmux server after building.
+- `build/linux/october-lantern --fixture desktop/fixtures/<surface>.json --out <file.png> --scale 2` renders one surface from a saved model (no engine, network or agents), for visual checks against the Mac.
+- `--new-session`, `--point-ask`, `--ask`, `--connections`, `--settings` and `--welcome` open each part of the running app. `--check-desktop` verifies the installed portal APIs and shortcut session lifecycle without binding keys.
+- `scripts/check-windows-types.sh` type-checks the Windows code from Linux or macOS (clippy `-D warnings`, nothing linked).
+- `scripts/build-bus-linux.sh` bundles the pinned native Bus; `scripts/package-linux.sh` produces Linux release assets. CI creates artifacts; its optional Publish input explicitly uploads a release. The updater source is selected by the build-time `LANTERN_RELEASES_REPO` variable.
+- `scripts/setup-dictation.sh` installs local whisper.cpp and the multilingual model without root access and verifies transcription with the upstream sample.
 - `OctoberLantern --snapshot <dir>` renders the panels offscreen, handy for UI changes.
 
 ## How the pieces talk

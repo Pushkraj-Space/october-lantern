@@ -20,3 +20,65 @@ jobs:
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
       - name: Checks (engine fmt, clippy, tests; app build and tests; script syntax)
         run: scripts/check.sh
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine -> ../build/target
+            desktop -> ../build/target
+      - name: Install Linux runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y tmux sqlite3 libgl1 libxkbcommon0 libwayland-client0
+      - name: Check Rust engine and desktop
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/build/target
+        run: scripts/check.sh
+      - name: Build and verify the sidecar protocol
+        run: scripts/build-app.sh --debug
+      - name: Test procfs discovery and safe tmux delivery
+        run: python3 scripts/smoke-linux.py
+
+  windows:
+    runs-on: windows-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\build\target
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine -> ../build/target
+            desktop -> ../build/target
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - name: Check Rust engine and desktop
+        run: pwsh -File scripts/check.ps1
+      - name: Build the release app and verify the sidecar protocol
+        run: pwsh -File scripts/build-windows.ps1
+      - name: Bundle October Bus
+        run: pwsh -File scripts/build-bus-windows.ps1
+      - name: Test discovery, Lantern sessions, safe delivery and Bus
+        run: python scripts/smoke-windows.py --bus
+      # A build to try: the release zip and installer (unsigned), as a workflow artifact.
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Package
+        run: pwsh -File scripts/package-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: October-Lantern-windows-x86_64-${{ github.sha }}
+          path: |
+            build/October-Lantern-windows-x86_64.zip
+            build/October-Lantern-windows-x86_64.zip.sha256
+            build/October-Lantern-windows-x86_64-setup.exe
+            build/October-Lantern-windows-x86_64-setup.exe.sha256

@@ -53,7 +53,7 @@ fn sockets(table: &ProcTable) -> BTreeSet<Option<String>> {
     let mut out = BTreeSet::new();
     let mut any = false;
     for p in table.procs.values() {
-        if p.name != "tmux" && p.cmd.first().map(|a| basename(a)) != Some("tmux") {
+        if p.name != "tmux" && !p.name.starts_with("tmux:") && p.cmd.first().map(|a| basename(a)) != Some("tmux") {
             continue;
         }
         any = true;
@@ -66,6 +66,20 @@ fn sockets(table: &ProcTable) -> BTreeSet<Option<String>> {
             }
         }
         out.insert(found);
+    }
+    // Linux tmux rewrites argv to "tmux: server", losing its original -L/-S arguments.
+    // Enumerate only our user's socket directory so named servers remain discoverable.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        let uid = unsafe { libc::getuid() };
+        let root = std::env::var_os("TMUX_TMPDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "/tmp".into());
+        for entry in std::fs::read_dir(root.join(format!("tmux-{uid}"))).into_iter().flatten().flatten() {
+            if entry.metadata().is_ok_and(|m| m.file_type().is_socket() && m.uid() == uid) {
+                any = true;
+                out.insert(Some(entry.path().to_string_lossy().into_owned()));
+            }
+        }
     }
     if !any {
         out.clear();

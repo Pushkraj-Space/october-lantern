@@ -1,0 +1,56 @@
+[package]
+name = "lantern-desktop"
+version = "0.4.2"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+# accesskit: widget labels reach native screen readers (AT-SPI on Linux, UI Automation on Windows),
+# as SwiftUI's do for VoiceOver.
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+qrcode = { version = "0.14", default-features = false }
+ureq = { version = "3.4.2", features = ["json"] }
+url = "2.5"
+uuid = { version = "1.26", features = ["v4"] }
+sha2 = "0.11"
+base64 = "0.23"
+egui_commonmark = { version = "0.25", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+semver = "1"
+# The October sign-in brand marks (macos/Resources/brands/*.svg), drawn crisp at any scale.
+resvg = { version = "0.48.1", default-features = false }
+# CommonMark inline parsing for chat Markdown (already in the tree through egui_commonmark).
+pulldown-cmark = { version = "0.13.4", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+ksni = { version = "0.3.6", features = ["blocking"] }
+# The pill and panel windows on X11/XWayland (EWMH state, dock type, work area). Already in the
+# tree through winit.
+x11rb = "0.13.2"
+winit = { version = "0.30.13", default-features = false, features = ["x11", "wayland"] }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+rfd = "0.15"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Media",
+    "Win32_Media_Audio",
+    "Win32_Security",
+    "Win32_Security_Credentials",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

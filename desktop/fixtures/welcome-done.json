@@ -1,0 +1,10 @@
+{
+  "surface": "welcome",
+  "nowMs": 1790000000000,
+  "home": "/home/me",
+  "model": {
+    "prefs": {"edge": "right", "point_ask_hotkey": "ctrl+alt+p"},
+    "caps": {"platform": "linux", "global_hotkeys": true, "tray": true}
+  },
+  "view": {"welcome_step": 2}
+}

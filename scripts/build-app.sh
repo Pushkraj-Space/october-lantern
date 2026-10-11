@@ -8,6 +8,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ "$(uname -s)" == Linux ]]; then
+  exec "$ROOT/scripts/build-linux.sh" "$@"
+fi
 PROFILE=release
 [[ "${1:-}" == "--debug" ]] && PROFILE=debug
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/engine/Cargo.toml" | head -1)"

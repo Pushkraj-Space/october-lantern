@@ -169,6 +169,15 @@ pub enum Route {
     Iterm {
         tty: String,
     },
+    /// One of Lantern's own sessions on Windows (see pty.rs), by name.
+    Pty {
+        session: String,
+    },
+    /// The agent's own Windows console (Windows Terminal, VS Code, a console window), by the pid
+    /// of its console host (see console.rs).
+    Console {
+        host: u32,
+    },
     None,
 }
 

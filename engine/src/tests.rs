@@ -9,11 +9,43 @@ use crate::model::{Agent, Kind, QuestionKind, Route, State, StateSource};
 use crate::procs::Proc;
 use crate::{deliver, history, hooks, scanner, transcripts};
 
-fn temp_dir(name: &str) -> PathBuf {
+/// A folder under the system temp dir, removed when the test ends (even when it fails): tests
+/// that point HOME here install hooks, which copies the engine binary in.
+struct TempDir(PathBuf);
+impl std::ops::Deref for TempDir {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir(name: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!("lantern-test-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    dir
+    TempDir(dir)
+}
+
+#[cfg(windows)]
+#[test]
+fn classifies_windows_command_lines() {
+    let claude = r"C:\Users\x\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js";
+    assert_eq!(scanner::classify(&proc(&[r"C:\Program Files\nodejs\node.exe", claude])), Some(Kind::Claude));
+    assert_eq!(scanner::classify(&proc(&[r"C:\Users\x\.local\bin\claude.exe"])), Some(Kind::Claude));
+    assert_eq!(scanner::classify(&proc(&[r"C:\Users\x\.local\bin\CLAUDE.EXE", "-p", "hi"])), None);
+    let codex = r"C:\Users\x\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js";
+    assert_eq!(scanner::classify(&proc(&["node.exe", codex, "resume"])), Some(Kind::Codex));
+    assert_eq!(scanner::classify(&proc(&["node.exe", r"C:\work\cli.js"])), None);
 }
 
 fn proc(cmd: &[&str]) -> Proc {
@@ -128,7 +160,7 @@ fn codex_code_mode_tool_calls() {
 #[test]
 fn hooks_install_uninstall_and_missing_app() {
     let home = temp_dir("home");
-    unsafe { std::env::set_var("HOME", &home) };
+    unsafe { std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &*home) };
     fs::create_dir_all(home.join(".claude")).unwrap();
     fs::create_dir_all(home.join(".codex")).unwrap();
     let theirs = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]},"model":"opus"}"#;
@@ -149,7 +181,7 @@ fn hooks_install_uninstall_and_missing_app() {
     assert!(settings.contains("PermissionRequest"));
     let config = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
     assert!(config.contains("lantern-engine") && config.contains("[tui]"));
-    assert!(hooks::support_dir().join("bin/lantern-engine").exists());
+    assert!(hooks::support_dir().join("bin").join(format!("lantern-engine{}", std::env::consts::EXE_SUFFIX)).exists());
 
     // Installing twice doesn't duplicate anything, and the second backup doesn't overwrite the first.
     hooks::install().unwrap();
@@ -161,12 +193,15 @@ fn hooks_install_uninstall_and_missing_app() {
     assert_eq!(backups, 2);
 
     // If Lantern is gone, the hook command still exits 0 and prints nothing.
-    let gone = home.join("nowhere/lantern-engine");
-    let out = Command::new("/bin/sh").args(["-c", &hooks::claude_hook_command(&gone)]).output().unwrap();
-    assert!(out.status.success() && out.stdout.is_empty());
-    let codex = hooks::codex_notify_command(&gone);
-    let out = Command::new(&codex[0]).args(&codex[1..]).arg("{\"type\":\"agent-turn-complete\"}").output().unwrap();
-    assert!(out.status.success());
+    #[cfg(unix)]
+    {
+        let gone = home.join("nowhere/lantern-engine");
+        let out = Command::new("/bin/sh").args(["-c", &hooks::claude_hook_command(&gone)]).output().unwrap();
+        assert!(out.status.success() && out.stdout.is_empty());
+        let codex = hooks::codex_notify_command(&gone);
+        let out = Command::new(&codex[0]).args(&codex[1..]).arg("{\"type\":\"agent-turn-complete\"}").output().unwrap();
+        assert!(out.status.success());
+    }
 
     hooks::uninstall_everything().unwrap();
     let settings: serde_json::Value = serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap()).unwrap();
@@ -277,6 +312,7 @@ pub(crate) fn agent_for(pid: u32, start_time: u64, tty: Option<&str>) -> Agent {
 
 /// Typing goes to a process, not a terminal: an agent that exited (or a reused pid, or a
 /// different terminal) is refused before anything is sent.
+#[cfg(unix)]
 #[test]
 fn delivery_refuses_targets_that_are_not_the_agent_any_more() {
     // A child that exits at once, so its pid is gone (or reused by something with another start).
@@ -331,8 +367,37 @@ fn delivery_refuses_unknown_owners_and_changed_endpoints() {
     assert!(deliver::check(&moved, &live_like(&moved)).unwrap_err().to_string().contains("tab changed"));
 }
 
+/// A Lantern session (Windows) has no foreground to check; the agent must be the session's own
+/// process, alive, on the session's console.
+#[test]
+fn session_delivery_requires_the_sessions_own_agent() {
+    use crate::pty::Info;
+    let mut a = agent_for(40, 10, Some("con:900"));
+    a.exe = Some(r"C:\Program Files\nodejs\node.exe".into());
+    a.comm = "node.exe".into();
+    a.route = Route::Pty { session: "claude-app-1".into() };
+    // On Windows the foreground is never known; that must not matter here.
+    let live = crate::procs::Live { tpgid: 0, pgid: 0, ..live_like(&a) };
+    let info = Info { child_pid: 40, child_start: 10, child_tty: Some("con:900".into()), alive: true };
+    assert!(deliver::check_session(&a, &live, &info, &[]).is_ok());
+    // Started through a wrapper the session ran: still the session's agent.
+    let wrapper = Info { child_pid: 39, ..info.clone() };
+    assert!(deliver::check_session(&a, &live, &wrapper, &[39, 4]).is_ok());
+    assert!(deliver::check_session(&a, &live, &wrapper, &[4]).unwrap_err().to_string().contains("isn't the program"));
+    let ended = Info { alive: false, ..info.clone() };
+    assert!(deliver::check_session(&a, &live, &ended, &[]).unwrap_err().to_string().contains("ended"));
+    let other_console = Info { child_tty: Some("con:901".into()), ..info.clone() };
+    assert!(deliver::check_session(&a, &live, &other_console, &[]).unwrap_err().to_string().contains("console"));
+    let reused = crate::procs::Live { start: 11, ..live_like(&a) };
+    assert!(deliver::check_session(&a, &reused, &info, &[]).unwrap_err().to_string().contains("another process"));
+    // The ordinary terminal check still refuses an unknown foreground.
+    a.route = Route::None;
+    assert!(deliver::check(&a, &live).is_err());
+}
+
 /// The process audit's counterexample: same pid, same start time, same terminal, but the agent
 /// `exec`ed a shell. The kernel reports the new program, and delivery refuses.
+#[cfg(unix)]
 #[test]
 fn delivery_refuses_a_process_that_execed_something_else() {
     let mut child = Command::new("/bin/sh").args(["-c", "/bin/sleep 0.4; exec /bin/sleep 5"]).spawn().unwrap();
@@ -516,6 +581,7 @@ fn every_permission_request_gets_its_own_prompt_id() {
     assert!(second.question_detail.unwrap().contains("rm -rf ~"));
 }
 
+#[cfg(unix)]
 #[test]
 fn helpers_are_bounded_and_drained() {
     use std::time::{Duration, Instant};
@@ -533,6 +599,27 @@ fn helpers_are_bounded_and_drained() {
         crate::run::output(Command::new("/bin/sh").args(["-c", "echo hi; /bin/sleep 5 & exit 0"]), Duration::from_millis(100)).unwrap();
     assert!(t.elapsed() < Duration::from_millis(600), "{:?}", t.elapsed());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
+}
+
+/// The same limits on Windows, where the helper and what it starts share a job object.
+#[cfg(windows)]
+#[test]
+fn helpers_are_bounded_and_drained() {
+    use std::time::{Duration, Instant};
+    let out = crate::run::output(Command::new("cmd").args(["/d", "/c", "echo hi"]), Duration::from_secs(10)).unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
+    // Too slow: killed at the limit.
+    let t = Instant::now();
+    let e = crate::run::output(Command::new("ping").args(["-n", "6", "127.0.0.1"]), Duration::from_millis(200)).unwrap_err();
+    assert!(e.downcast_ref::<crate::run::TimedOut>().is_some());
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    // Exits at once, but leaves a child holding its output open: still ends at the limit.
+    let t = Instant::now();
+    let out =
+        crate::run::output(Command::new("cmd").args(["/d", "/c", "start /b ping -n 6 127.0.0.1 & echo hi"]), Duration::from_millis(500))
+            .unwrap();
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("hi"));
 }
 
 /// A screenshot reaches each agent in a way it can use: attached (Codex), or readable without a
@@ -842,19 +929,26 @@ fn october_agents_match_their_node() {
 #[test]
 fn harness_pin_is_read_and_checked() {
     use crate::harness::{parse_node_version, parse_pin, pin};
-    let shipped = pin().expect("engine/harness.json must parse for this Mac");
+    let shipped = pin().expect("engine/harness.json must have a pin for this system");
     assert_eq!(shipped.package, "@october-dev/october");
     assert!(shipped.node_minimum >= (22, 19, 0));
     assert!(parse_node_version(&shipped.node_version).unwrap() >= shipped.node_minimum, "the pinned Node.js must satisfy the harness");
     let json = include_str!("../harness.json");
-    for (arch, node) in [("arm64", "arm64"), ("x86_64", "x64")] {
-        let p = parse_pin(json, arch).unwrap();
-        assert!(p.node_url.ends_with(&format!("-darwin-{node}.tar.gz")), "{}", p.node_url);
+    for (key, archive) in [
+        ("darwin-arm64", "tar.gz"),
+        ("darwin-x64", "tar.gz"),
+        ("linux-x64", "tar.xz"),
+        ("linux-arm64", "tar.xz"),
+        ("win-x64", "zip"),
+        ("win-arm64", "zip"),
+    ] {
+        let p = parse_pin(json, key).unwrap();
+        assert!(p.node_url.ends_with(&format!("-{key}.{archive}")), "{}", p.node_url);
         assert_eq!(p.node_sha256.len(), 64);
     }
     // Anything off is no pin at all.
-    assert!(parse_pin(&json.replace("https://nodejs.org/dist/", "http://example.com/"), "arm64").is_none());
-    assert!(parse_pin(&json.replace("bed7eea5", "zzzzzzzz"), "arm64").is_none());
+    assert!(parse_pin(&json.replace("https://nodejs.org/dist/", "http://example.com/"), "darwin-arm64").is_none());
+    assert!(parse_pin(&json.replace("bed7eea5", "zzzzzzzz"), "darwin-arm64").is_none());
     assert!(parse_pin(json, "riscv").is_none());
     assert_eq!(parse_node_version("v22.19.0\n"), Some((22, 19, 0)));
     assert_eq!(parse_node_version("24.21"), Some((24, 21, 0)));
@@ -869,6 +963,41 @@ fn harness_pin_is_read_and_checked() {
     assert!(!allows(&json!(["!darwin"]), "darwin"));
     assert!(allows(&json!(["!win32"]), "darwin"));
     assert!(!allows(&json!(["x64"]), "arm64"));
+}
+
+#[test]
+fn harness_targets_name_each_systems_files() {
+    use crate::harness::Target;
+    use std::path::Path;
+    let mac = Target { os: "darwin", arch: "arm64" };
+    let linux = Target { os: "linux", arch: "x64" };
+    let windows = Target { os: "win", arch: "x64" };
+    assert_eq!((mac.key(), mac.archive(), mac.npm_os()), ("darwin-arm64".into(), "tar.gz", "darwin"));
+    assert_eq!((linux.key(), linux.archive(), linux.npm_os()), ("linux-x64".into(), "tar.xz", "linux"));
+    assert_eq!((windows.key(), windows.archive(), windows.npm_os()), ("win-x64".into(), "zip", "win32"));
+    let node = Path::new("/r/node-v24.21.0-linux-x64");
+    assert_eq!(linux.node_bin(node), node.join("bin"));
+    assert_eq!(linux.node_exe(&linux.node_bin(node)), node.join("bin").join("node"));
+    assert_eq!(linux.npm_cli(node), node.join("lib/node_modules/npm/bin/npm-cli.js"));
+    assert_eq!(linux.node_dir(&linux.node_bin(node)).as_deref(), Some(node));
+    let win = Path::new(r"C:\r\node-v24.21.0-win-x64");
+    assert_eq!(windows.node_bin(win), win);
+    assert_eq!(windows.node_exe(win), win.join("node.exe"));
+    assert_eq!(windows.npm_cli(win), win.join("node_modules").join("npm").join("bin").join("npm-cli.js"));
+    assert_eq!(windows.harness_bin(Path::new("h")), Path::new("h").join("node_modules").join(".bin").join("october.cmd"));
+    assert_eq!((linux.path_separator(), windows.path_separator()), (':', ';'));
+    assert!(crate::harness::pin().is_some(), "this system has a pin");
+}
+
+#[test]
+fn the_token_command_is_quoted_for_each_shell() {
+    use crate::harness::token_command;
+    assert_eq!(token_command("/A B/lantern-engine", false), "'/A B/lantern-engine' october-token");
+    assert_eq!(token_command("/it's/lantern-engine", false), r"'/it'\''s/lantern-engine' october-token");
+    assert_eq!(
+        token_command(r"C:\Program Files\Lantern\lantern-engine.exe", true),
+        r#""C:\Program Files\Lantern\lantern-engine.exe" october-token"#
+    );
 }
 
 #[test]
@@ -926,18 +1055,19 @@ fn the_bundled_harness_counts_as_installed() {
     let root = temp_dir("harness");
     assert!(bundled_in(&root).is_none());
     let version = crate::harness::pin().unwrap().version;
+    let target = crate::harness::Target::this();
     let dir = root.join("harness").join(&version);
     fs::create_dir_all(dir.join("node_modules/.bin")).unwrap();
-    fs::write(dir.join("node_modules/.bin/october"), "#!/usr/bin/env node\n").unwrap();
+    fs::write(target.harness_bin(&dir), "#!/usr/bin/env node\n").unwrap();
     assert!(bundled_in(&root).is_none(), "no Node.js recorded yet");
     let node_bin = root.join("node/bin");
     fs::write(dir.join("node-bin"), node_bin.to_string_lossy().as_bytes()).unwrap();
     assert!(bundled_in(&root).is_none(), "its Node.js is gone");
     fs::create_dir_all(&node_bin).unwrap();
-    fs::write(node_bin.join("node"), "").unwrap();
+    fs::write(target.node_exe(&node_bin), "").unwrap();
     let b = bundled_in(&root).unwrap();
     assert_eq!(b.node_bin, node_bin);
-    assert!(b.bin.ends_with("node_modules/.bin/october"));
+    assert_eq!(b.bin, target.harness_bin(&dir), "the system's own program (october.cmd on Windows)");
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -947,4 +1077,22 @@ fn launched_agents_are_asked_for_full_paths() {
     let m = crate::launch::with_guidance("find my passport".into(), std::path::Path::new("/Users/me"));
     assert!(m.starts_with("find my passport"));
     assert!(m.contains("You're in /Users/me") && m.contains("full absolute path"));
+}
+
+/// The note names the computer the agent is on, never "the Mac" elsewhere, and keeps the prefix
+/// the apps hide in the conversation.
+#[test]
+fn launch_guidance_fits_each_platform() {
+    use crate::launch::guidance_for;
+    let mac = guidance_for("macos", "hi".into(), std::path::Path::new("/Users/me"));
+    assert!(mac.contains("on macOS.") && mac.contains("/Users/name/") && mac.contains("mdfind"));
+    let linux = guidance_for("linux", "hi".into(), std::path::Path::new("/home/me"));
+    assert!(linux.contains("on Linux.") && linux.contains("/home/name/") && linux.contains("locate"));
+    assert!(!linux.contains("Mac") && !linux.contains("mdfind"));
+    let windows = guidance_for("windows", "hi".into(), std::path::Path::new(r"C:\Users\me"));
+    assert!(windows.contains("on Windows.") && windows.contains(r"C:\Users\name\Documents") && windows.contains("Get-ChildItem"));
+    assert!(!windows.contains("Mac"));
+    for note in [mac, linux, windows] {
+        assert!(note.starts_with("hi\n\n(Started from October Lantern"));
+    }
 }

@@ -1,0 +1,9 @@
+.lantern-edge {
+    background-color: rgba(22, 27, 34, 0.94);
+    border: 1px solid rgba(242, 153, 80, 0.45);
+    border-radius: 18px;
+    padding: 12px 9px;
+    font-size: 20px;
+    box-shadow: 0 3px 16px rgba(0, 0, 0, 0.3);
+}
+.lantern-edge:hover { background-color: #303742; }

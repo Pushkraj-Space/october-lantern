@@ -6,7 +6,6 @@
 //! - `devices.json`: paired phones, with only a SHA-256 hash of each phone's credential.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
@@ -23,10 +22,10 @@ fn dir() -> PathBuf {
 fn write_private(path: &PathBuf, bytes: &[u8]) -> Result<()> {
     let d = dir();
     fs::create_dir_all(&d)?;
-    fs::set_permissions(&d, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(&d, 0o700)?;
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, bytes)?;
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    crate::platform::set_mode(&tmp, 0o600)?;
     fs::rename(&tmp, path)?;
     Ok(())
 }
