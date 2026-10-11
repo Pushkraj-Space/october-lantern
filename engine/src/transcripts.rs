@@ -53,6 +53,7 @@ pub fn lines(text: &str) -> impl Iterator<Item = Value> + '_ {
 pub struct Transcripts {
     parsed: HashMap<PathBuf, ((u64, u64), SessionStatus, Instant)>,
     claude_index: HashMap<String, PathBuf>,
+    codex_index: HashMap<String, PathBuf>,
     codex_open: HashMap<u32, (Instant, Option<PathBuf>)>,
 }
 
@@ -75,6 +76,7 @@ impl Transcripts {
     pub fn prune_stale(&mut self) {
         self.parsed.retain(|_, (_, _, used)| used.elapsed() < CACHE_IDLE);
         self.claude_index.retain(|_, p| p.exists());
+        self.codex_index.retain(|_, p| p.exists());
     }
 
     // ---------- Claude Code ----------
@@ -131,6 +133,27 @@ impl Transcripts {
         let path = codex_open_rollout(pid);
         self.codex_open.insert(pid, (Instant::now(), path.clone()));
         path
+    }
+
+    /// The rollout for a Codex session id (from its hook), when the open file isn't readable
+    /// (Windows): `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<session id>.jsonl`.
+    pub fn codex_path_for_session(&mut self, session_id: &str, started_secs: u64) -> Option<PathBuf> {
+        if let Some(p) = self.codex_index.get(session_id)
+            && p.exists()
+        {
+            return Some(p.clone());
+        }
+        let suffix = format!("-{session_id}.jsonl");
+        let found = codex_rollouts_since(&codex_root(), started_secs).into_iter().find(|p| p.to_string_lossy().ends_with(&suffix))?;
+        self.codex_index.insert(session_id.to_string(), found.clone());
+        Some(found)
+    }
+
+    /// Best guess when the open file isn't readable (Windows) and no hook named the session: the
+    /// newest rollout for this folder that changed since the process started and isn't claimed by
+    /// another agent (Codex writes the folder in the file's first line).
+    pub fn codex_guess_path(&self, cwd: &Path, started_secs: u64, claimed: &[PathBuf]) -> Option<PathBuf> {
+        codex_guess_in(&codex_root(), cwd, started_secs, claimed)
     }
 
     pub fn codex_status(&mut self, path: &Path) -> Option<SessionStatus> {
@@ -215,6 +238,59 @@ pub(crate) fn parse_claude(path: &Path, mtime: u64) -> SessionStatus {
     status
 }
 
+fn codex_root() -> PathBuf {
+    home().join(".codex").join("sessions")
+}
+
+fn codex_guess_in(root: &Path, cwd: &Path, started_secs: u64, claimed: &[PathBuf]) -> Option<PathBuf> {
+    let started_ms = started_secs.saturating_sub(60) * 1000;
+    codex_rollouts_since(root, started_secs)
+        .into_iter()
+        .filter(|p| !claimed.contains(p))
+        .filter_map(|p| file_stamp(&p).map(|(m, _)| (m, p)))
+        .filter(|(m, _)| *m >= started_ms)
+        .filter(|(_, p)| codex_cwd(p).is_some_and(|folder| same_folder(&folder, cwd)))
+        .max_by_key(|(m, _)| *m)
+        .map(|(_, p)| p)
+}
+
+/// Codex rollouts in the day folders from a day before `started_secs` to a day after now (the
+/// folders use local dates), so a scan never walks the whole history.
+fn codex_rollouts_since(root: &Path, started_secs: u64) -> Vec<PathBuf> {
+    let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let mut day = started_secs.saturating_sub(86_400);
+    let mut out = Vec::new();
+    while day <= now + 86_400 {
+        if let Ok(date) = time::OffsetDateTime::from_unix_timestamp(day as i64) {
+            let dir =
+                root.join(format!("{:04}", date.year())).join(format!("{:02}", u8::from(date.month()))).join(format!("{:02}", date.day()));
+            if let Ok(entries) = fs::read_dir(dir) {
+                out.extend(entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl")));
+            }
+        }
+        day += 86_400;
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The folder a Codex rollout was started in (its `session_meta`).
+fn codex_cwd(path: &Path) -> Option<String> {
+    let head = read_range(path, false, 64 * 1024)?;
+    lines(&head).find(|entry| entry["type"] == "session_meta").and_then(|entry| entry["payload"]["cwd"].as_str().map(String::from))
+}
+
+/// Same folder, allowing for Windows' case-insensitive paths and either slash.
+fn same_folder(recorded: &str, cwd: &Path) -> bool {
+    let normal = |path: &str| {
+        let path = path.replace('\\', "/");
+        let path = path.trim_end_matches('/');
+        if cfg!(windows) { path.to_lowercase() } else { path.to_string() }
+    };
+    normal(recorded) == normal(&cwd.to_string_lossy())
+}
+
 fn codex_open_rollout(pid: u32) -> Option<PathBuf> {
     crate::apps::codex_open_rollouts(pid)
         .into_iter()
@@ -278,4 +354,39 @@ pub(crate) fn parse_codex(path: &Path, mtime: u64) -> SessionStatus {
     }
     status.state = Some(state);
     status
+}
+
+#[cfg(test)]
+mod codex_fallback_tests {
+    use super::*;
+
+    fn rollout(root: &Path, day: u64, name: &str, cwd: &str) -> PathBuf {
+        let date = time::OffsetDateTime::from_unix_timestamp(day as i64).unwrap();
+        let dir =
+            root.join(format!("{:04}", date.year())).join(format!("{:02}", u8::from(date.month()))).join(format!("{:02}", date.day()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        let meta = serde_json::json!({"type": "session_meta", "payload": {"id": "x", "cwd": cwd}});
+        fs::write(&path, format!("{meta}\n")).unwrap();
+        path
+    }
+
+    #[test]
+    fn without_open_files_codex_is_found_by_folder_and_start_never_another_agents() {
+        let root = std::env::temp_dir().join(format!("lantern-codex-{}", std::process::id()));
+        let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let started = now - 30;
+        let mine = rollout(&root, now, "rollout-a-0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl", r"C:\Users\me\proj");
+        let other_folder = rollout(&root, now, "rollout-b-0199aaaa-bbbb-cccc-dddd-ffffffffffff.jsonl", r"C:\Users\me\other");
+        // Windows paths: case and slashes don't matter; another folder never matches.
+        let cwd = if cfg!(windows) { Path::new(r"c:\users\me\proj") } else { Path::new(r"C:\Users\me\proj") };
+        assert_eq!(codex_guess_in(&root, cwd, started, &[]), Some(mine.clone()));
+        assert_eq!(codex_guess_in(&root, cwd, started, std::slice::from_ref(&mine)), None, "claimed by another agent");
+        assert_eq!(codex_guess_in(&root, Path::new(r"C:\Users\me\proj"), now + 3600, &[]), None, "older than the process");
+        assert!(codex_rollouts_since(&root, started).contains(&other_folder));
+        assert_eq!(codex_cwd(&mine).as_deref(), Some(r"C:\Users\me\proj"));
+        assert!(same_folder("/home/me/proj/", Path::new("/home/me/proj")));
+        assert!(!same_folder("/home/me/proj", Path::new("/home/me/project")));
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

@@ -21,6 +21,8 @@ pub struct Scanner {
     /// Remember the transcript each Claude process was matched to (and whether exactly), so
     /// guesses stay stable.
     claude_paths: HashMap<u32, (PathBuf, bool)>,
+    /// Codex rollouts found without the process's open files (Windows): path, and whether exact.
+    codex_paths: HashMap<u32, (PathBuf, bool)>,
     /// Handle numbers stay with an agent for its whole life; a new agent takes the lowest free one.
     handles: HashMap<u32, (Kind, usize)>,
     opencode_cache: HashMap<u32, ((u64, u64), SessionStatus)>,
@@ -173,6 +175,7 @@ impl Scanner {
             children: HashMap::new(),
             transcripts: Transcripts::default(),
             claude_paths: HashMap::new(),
+            codex_paths: HashMap::new(),
             handles: HashMap::new(),
             opencode_cache: HashMap::new(),
             started: HashMap::new(),
@@ -218,6 +221,7 @@ impl Scanner {
         let children: Vec<u32> = live.iter().filter_map(|pid| table.child_of(*pid)).collect();
         self.transcripts.forget_pids(&[live.clone(), children].concat());
         self.claude_paths.retain(|pid, _| live.contains(pid));
+        self.codex_paths.retain(|pid, _| live.contains(pid));
         self.handles.retain(|pid, (kind, _)| agents.iter().any(|(p, k)| p.pid == *pid && k == kind));
         self.opencode_cache.retain(|pid, _| live.contains(pid));
         self.children = live.iter().filter_map(|pid| table.child_of(*pid).map(|c| (*pid, c))).collect();
@@ -455,6 +459,7 @@ impl Scanner {
                     .transcripts
                     .codex_path_for_pid(agent.pid)
                     .or_else(|| self.children.get(&agent.pid).copied().and_then(|c| self.transcripts.codex_path_for_pid(c)))
+                    .or_else(|| self.codex_paths.get(&agent.pid).map(|(p, _)| p.clone()))
                     .map(|p| (Kind::Codex, p)),
                 Kind::Pi | Kind::October | Kind::Gemini => {
                     let (cwd, start) = self.started.get(&agent.pid)?;
@@ -562,12 +567,37 @@ impl Scanner {
             Kind::Codex => {
                 // The node wrapper doesn't hold the file; its native child does.
                 let child = self.children.get(&p.pid).copied();
-                let path =
+                let open =
                     self.transcripts.codex_path_for_pid(p.pid).or_else(|| child.and_then(|c| self.transcripts.codex_path_for_pid(c)));
-                match path {
-                    Some(path) => found(self.transcripts.codex_status(&path), SessionMatch::Exact),
-                    None => (None, SessionMatch::None),
+                if let Some(path) = open {
+                    return found(self.transcripts.codex_status(&path), SessionMatch::Exact);
                 }
+                // Where open files can't be read (Windows): the session its hook named, the one
+                // found before, or the newest unclaimed rollout for its folder. Elsewhere the open
+                // file is the truth, and no file yet means nothing has happened.
+                if !cfg!(windows) {
+                    return (None, SessionMatch::None);
+                }
+                let from_hook = hook
+                    .and_then(|h| h.session_id.as_deref())
+                    .filter(|id| looks_like_id(id))
+                    .and_then(|id| self.transcripts.codex_path_for_session(id, p.start_time));
+                let found_path = match from_hook {
+                    Some(path) => Some((path, true)),
+                    None => match self.codex_paths.get(&p.pid).filter(|(p, _)| p.exists()) {
+                        Some(known) => Some(known.clone()),
+                        None => {
+                            let claimed: Vec<PathBuf> = self.codex_paths.values().map(|(p, _)| p.clone()).collect();
+                            p.cwd
+                                .as_deref()
+                                .and_then(|cwd| self.transcripts.codex_guess_path(cwd, p.start_time, &claimed))
+                                .map(|p| (p, false))
+                        }
+                    },
+                };
+                let Some((path, exact)) = found_path else { return (None, SessionMatch::None) };
+                self.codex_paths.insert(p.pid, (path.clone(), exact));
+                found(self.transcripts.codex_status(&path), if exact { SessionMatch::Exact } else { SessionMatch::Guessed })
             }
             // No session file since the process started means nothing has happened yet.
             Kind::Pi | Kind::October => {
