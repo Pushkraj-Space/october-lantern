@@ -374,14 +374,71 @@ static SESSION: Mutex<Option<(String, u64)>> = Mutex::new(None);
 
 /// The app's `october.session`: a token, or `None` when signed out.
 pub fn set_session(session: Option<(String, u64)>) {
-    *SESSION.lock().unwrap() = session.filter(|(t, _)| !t.is_empty());
+    let session = session.filter(|(t, _)| !t.is_empty());
+    write_token_file(session.as_ref());
+    *SESSION.lock().unwrap() = session;
+}
+
+/// Where `lantern-engine october-token` reads the current access token: a 0600 file in Lantern's
+/// 0700 support folder, rewritten whenever the app signs in or refreshes, and removed on sign-out.
+/// Access token only (it expires within the hour); never the refresh token.
+pub fn token_file() -> std::path::PathBuf {
+    crate::hooks::support_dir().join("october-token.json")
+}
+
+fn write_token_file(session: Option<&(String, u64)>) {
+    let path = token_file();
+    let Some((token, expires_at)) = session else {
+        let _ = std::fs::remove_file(&path);
+        return;
+    };
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = std::fs::create_dir_all(crate::hooks::support_dir());
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let body = serde_json::json!({"accessToken": token, "expiresAt": expires_at}).to_string();
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(body.as_bytes()));
+    if written.is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    } else {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// `lantern-engine october-token`, the harness's `OCTOBER_TOKEN_COMMAND`: prints
+/// {"accessToken","expiresAt"} when the app's current token is still good for at least a minute.
+pub fn print_token() -> bool {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let Ok(raw) = std::fs::read_to_string(token_file()) else { return false };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { return false };
+    match (v["accessToken"].as_str(), v["expiresAt"].as_u64()) {
+        (Some(t), Some(exp)) if !t.is_empty() && exp > now + 60 => {
+            println!("{}", serde_json::json!({"accessToken": t, "expiresAt": exp}));
+            true
+        }
+        _ => false,
+    }
 }
 
 /// `OCTOBER_SUPABASE_*` for an October launch: empty when signed out or the token has expired
 /// (the harness then asks you to /login itself). Never a refresh token.
 pub fn session_env() -> Vec<(String, String)> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    env_for(SESSION.lock().unwrap().as_ref(), now)
+    let mut env = env_for(SESSION.lock().unwrap().as_ref(), now);
+    // The harness runs this through the shell near expiry and after a 401 to get a fresh token.
+    if !env.is_empty()
+        && let Ok(exe) = std::env::current_exe()
+    {
+        let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', "'\\''"));
+        env.push(("OCTOBER_TOKEN_COMMAND".into(), format!("{quoted} october-token")));
+    }
+    env
 }
 
 pub(crate) fn env_for(session: Option<&(String, u64)>, now: u64) -> Vec<(String, String)> {

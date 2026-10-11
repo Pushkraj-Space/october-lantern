@@ -94,6 +94,12 @@ fn main() -> Result<()> {
         // October Harness: its status, or install it now (into Lantern's support folder, or
         // `--root DIR` to try the install elsewhere; `--download-node` skips October Desktop's
         // Node.js and downloads the pinned one).
+        Some("october-token") => {
+            if !harness::print_token() {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Some("harness") => match args.get(1).map(String::as_str) {
             Some("status") | None => {
                 let on_path = launch::on_path().kinds.contains(&model::Kind::October);
