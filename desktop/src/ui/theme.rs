@@ -12,6 +12,8 @@ use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, FontId,
 pub const AMBER: Color32 = Color32::from_rgb(250, 184, 69);
 pub const GREEN: Color32 = Color32::from_rgb(92, 204, 130);
 pub const RED: Color32 = Color32::from_rgb(237, 92, 92);
+/// Native dark-mode link blue; links are not amber app controls (ref-4).
+pub const LINK: Color32 = Color32::from_rgb(10, 132, 255);
 pub const INK: Color32 = Color32::WHITE;
 pub const MUTED: Color32 = Color32::from_rgba_premultiplied(140, 140, 140, 140);
 pub const FAINT: Color32 = Color32::from_rgba_premultiplied(18, 18, 18, 18);

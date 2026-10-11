@@ -12,6 +12,7 @@ pub mod components;
 mod composer;
 mod feed;
 pub mod icons;
+mod markdown;
 mod october;
 mod sessions;
 pub mod theme;
@@ -644,6 +645,83 @@ mod tests {
             out,
             vec![UiAction::AnswerPermission { agent_id: "claude:1:1".into(), prompt_id: "fixture-prompt-1".into(), allow: true }]
         );
+    }
+
+    #[test]
+    fn a_card_link_returns_only_open_url_not_open_chat_or_a_platform_command() {
+        fn find(shape: &egui::Shape) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(text) if text.galley.job.text == "A PR #228 is ready." => {
+                    Some(text.pos + text.galley.pos_from_cursor(egui::text::CCursor::new(4)).center().to_vec2() + egui::vec2(1.0, 0.0))
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let assets = Assets::load(&ctx);
+        let model = Model {
+            panel: Some(PanelMode::Inbox),
+            engine: EngineHealth::Ready,
+            agents: vec![Agent {
+                id: "a".into(),
+                handle: "codex-1".into(),
+                state: AgentState::Waiting,
+                last_message: Some("A [PR #228](https://example.com/pr/228) is ready.".into()),
+                ..Default::default()
+            }],
+            inbox: crate::model::Inbox { earlier: vec!["a".into()], ..Default::default() },
+            ..Default::default()
+        };
+        let mut inputs = Inputs::default();
+        let mut view = UiState::default();
+        let mut actions = Vec::new();
+        let mut click = None;
+        for step in 0..3 {
+            let events = if step == 0 {
+                Vec::new()
+            } else {
+                let pos = click.unwrap();
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: step == 1,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            };
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(380.0, 900.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    render_panel(
+                        ui,
+                        &mut Ctx {
+                            model: &model,
+                            inputs: &mut inputs,
+                            view: &mut view,
+                            out: &mut actions,
+                            assets: &assets,
+                            env: &Env::default(),
+                        },
+                        900.0,
+                    );
+                },
+            );
+            if step == 0 {
+                click = output.shapes.iter().find_map(|shape| find(&shape.shape));
+                assert!(click.is_some());
+            }
+            assert!(!output.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::OpenUrl(_))));
+            output.textures_delta.clear();
+        }
+        assert_eq!(actions, vec![UiAction::OpenUrl("https://example.com/pr/228".into())]);
     }
 
     #[test]

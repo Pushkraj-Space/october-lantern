@@ -95,6 +95,24 @@ impl Lantern {
             UiAction::CloseLaunchPreview => self.close_preview(),
             UiAction::RetryPreviewInTerminal => self.retry_preview_in_terminal(),
             UiAction::OpenUrl(url) => self.open_url(&url),
+            // October Desktop (engine/src/october_link.rs).
+            UiAction::DesktopConnect => {
+                self.request(json!({"type": "october.pair"}));
+            }
+            UiAction::DesktopCancelPairing => {
+                self.request(json!({"type": "october.cancelPair"}));
+            }
+            UiAction::DesktopDisconnect => {
+                self.request(json!({"type": "october.forget"}));
+            }
+            // The Mac opens /Applications/October.app; elsewhere October registers its october:
+            // URL scheme, so the system starts whichever October is installed.
+            UiAction::OpenOctober => {
+                if crate::os::open("october://").is_err() {
+                    self.show("Couldn't open October Desktop. Is it installed?");
+                }
+            }
+            UiAction::GetOctober => self.open_url("https://www.october.dev"),
             UiAction::ReportProblem => {
                 let mut url = url::Url::parse("https://github.com/Pushkraj-Space/october-lantern/issues/new").expect("issue URL");
                 let system = crate::updates::system_name();

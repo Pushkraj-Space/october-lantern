@@ -238,71 +238,16 @@ pub fn markdown(ui: &mut Ui, source: &str, style: MarkdownStyle) -> Response {
 }
 
 pub fn markdown_spaced(ui: &mut Ui, source: &str, style: MarkdownStyle, line_spacing: f32) -> Response {
-    let mut job = inline_job(source, style);
-    if line_spacing > 0.0 {
-        let height = ui.fonts_mut(|fonts| fonts.row_height(&theme::font(style.size, Weight::Regular))) + line_spacing;
-        for section in &mut job.sections {
-            section.format.line_height = Some(height);
-        }
-    }
-    job.wrap.max_width = ui.available_width();
-    job.wrap.max_rows = style.max_rows;
-    ui.add(Label::new(job).selectable(true))
+    markdown_linked(ui, source, style, line_spacing).0
+}
+
+/// Same layout as `markdown_spaced`; a safe link click is returned for UiAction::OpenUrl.
+pub fn markdown_linked(ui: &mut Ui, source: &str, style: MarkdownStyle, line_spacing: f32) -> (Response, Option<String>) {
+    super::markdown::render(ui, source, style, line_spacing)
 }
 
 pub fn inline_job(source: &str, style: MarkdownStyle) -> egui::text::LayoutJob {
-    let mut job = egui::text::LayoutJob::default();
-    let mut rest = source;
-    while !rest.is_empty() {
-        let delimiter = if rest.starts_with('`') {
-            Some(("`", Weight::Mono, false))
-        } else if rest.starts_with("**") {
-            Some(("**", Weight::Semibold, false))
-        } else if rest.starts_with("__") {
-            Some(("__", Weight::Semibold, false))
-        } else if rest.starts_with('*') {
-            Some(("*", Weight::Regular, true))
-        } else if rest.starts_with('_') {
-            Some(("_", Weight::Regular, true))
-        } else {
-            None
-        };
-        if let Some((marker, weight, italics)) = delimiter
-            && let Some(end) = rest[marker.len()..].find(marker)
-            && end > 0
-        {
-            let body = &rest[marker.len()..marker.len() + end];
-            job.append(
-                body,
-                0.0,
-                egui::TextFormat {
-                    font_id: theme::font(if weight == Weight::Mono { style.size - 1.0 } else { style.size }, weight),
-                    color: style.color,
-                    italics,
-                    background: if weight == Weight::Mono { theme::black(0.2) } else { Color32::TRANSPARENT },
-                    ..Default::default()
-                },
-            );
-            rest = &rest[marker.len() * 2 + end..];
-        } else if let Some(stripped) = rest.strip_prefix('\\') {
-            if let Some(ch) = stripped.chars().next() {
-                job.append(&ch.to_string(), 0.0, format(style));
-                rest = &stripped[ch.len_utf8()..];
-            } else {
-                job.append(rest, 0.0, format(style));
-                break;
-            }
-        } else {
-            let len = rest.chars().next().unwrap().len_utf8();
-            job.append(&rest[..len], 0.0, format(style));
-            rest = &rest[len..];
-        }
-    }
-    job
-}
-
-fn format(style: MarkdownStyle) -> egui::TextFormat {
-    egui::TextFormat { font_id: theme::font(style.size, Weight::Regular), color: style.color, ..Default::default() }
+    super::markdown::inline_job(source, style)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -364,13 +309,25 @@ pub fn parse_blocks(source: &str) -> Vec<Block> {
 
 /// Full conversation Markdown, returning the code to copy (the caller emits UiAction::Copy).
 pub fn blocks(ui: &mut Ui, source: &str, id: Id) -> Option<String> {
-    let mut copy = None;
+    blocks_linked(ui, source, id).copy
+}
+
+#[derive(Default)]
+pub struct BlockActions {
+    pub copy: Option<String>,
+    pub link: Option<String>,
+}
+
+pub fn blocks_linked(ui: &mut Ui, source: &str, id: Id) -> BlockActions {
+    let mut actions = BlockActions::default();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
         for (i, block) in parse_blocks(source).into_iter().enumerate() {
             match block {
                 Block::Paragraph(body) => {
-                    markdown(ui, &body, MarkdownStyle::default());
+                    if let Some(link) = markdown_linked(ui, &body, MarkdownStyle::default(), 0.0).1 {
+                        actions.link = Some(link);
+                    }
                 }
                 Block::Heading(body) => {
                     label(ui, body, 13.0, Weight::Semibold, theme::INK);
@@ -379,7 +336,9 @@ pub fn blocks(ui: &mut Ui, source: &str, id: Id) -> Option<String> {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         label(ui, marker, 12.5, Weight::Regular, theme::MUTED);
-                        markdown(ui, &body, MarkdownStyle::default());
+                        if let Some(link) = markdown_linked(ui, &body, MarkdownStyle::default(), 0.0).1 {
+                            actions.link = Some(link);
+                        }
                     });
                 }
                 Block::Code(body) => {
@@ -398,7 +357,7 @@ pub fn blocks(ui: &mut Ui, source: &str, id: Id) -> Option<String> {
                                     .on_hover_text("Copy code")
                                     .clicked()
                                 {
-                                    copy = Some(body.clone());
+                                    actions.copy = Some(body.clone());
                                 }
                             });
                         });
@@ -406,7 +365,7 @@ pub fn blocks(ui: &mut Ui, source: &str, id: Id) -> Option<String> {
             }
         }
     });
-    copy
+    actions
 }
 
 pub fn time_ago(since_ms: Option<f64>, now_ms: f64) -> String {

@@ -106,7 +106,7 @@ fn thread(ui: &mut Ui, cx: &mut Ctx, max_height: f32) {
     });
 }
 
-fn render_turn(ui: &mut Ui, cx: &Ctx, turn: &AssistantTurn) {
+fn render_turn(ui: &mut Ui, cx: &mut Ctx, turn: &AssistantTurn) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
         c::label(ui, &turn.question, 12.5, Weight::Semibold, t::INK);
@@ -117,12 +117,16 @@ fn render_turn(ui: &mut Ui, cx: &Ctx, turn: &AssistantTurn) {
                 c::label(ui, "Thinking…", 12.0, Weight::Regular, t::MUTED);
             });
         } else {
-            c::markdown_spaced(
+            if let Some(link) = c::markdown_linked(
                 ui,
                 &turn.answer,
                 MarkdownStyle { size: 12.5, color: if turn.failed { t::RED } else { t::white(0.92) }, ..Default::default() },
                 2.0,
-            );
+            )
+            .1
+            {
+                cx.emit(UiAction::OpenUrl(link));
+            }
         }
         if let Some(started) = &turn.started {
             ui.horizontal(|ui| {
@@ -148,29 +152,32 @@ fn pending_card(ui: &mut Ui, cx: &mut Ctx, pending: &PendingTask) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 c::spinner(ui, 12.0, t::MUTED, cx.env);
-                let text_width = (ui.available_width() - 95.0).max(70.0);
-                ui.allocate_ui_with_layout(egui::vec2(text_width, 0.0), Layout::top_down(Align::Min), |ui| {
+                let controls = ["Cancel", "Start"]
+                    .iter()
+                    .map(|title| ui.painter().layout_no_wrap((*title).into(), t::font(11.5, Weight::Semibold), t::INK).size().x)
+                    .sum::<f32>();
+                let text_width = (ui.available_width() - controls - 20.0).max(1.0);
+                let folder = pending.folder.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or("");
+                let title = format!("Starting {} in {folder}… {}", pending.kind.display_name(), pending.seconds_left);
+                let mut prompt = egui::text::LayoutJob::single_section(
+                    pending.prompt.clone(),
+                    egui::TextFormat { font_id: t::font(11.0, Weight::Regular), color: t::MUTED, ..Default::default() },
+                );
+                prompt.wrap.max_width = text_width;
+                prompt.wrap.max_rows = 2;
+                let prompt = ui.painter().layout_job(prompt);
+                let height = ui.painter().layout(title.clone(), t::font(12.0, Weight::Semibold), t::INK, text_width).size().y
+                    + 2.0
+                    + prompt.size().y;
+                ui.allocate_ui_with_layout(egui::vec2(text_width, height), Layout::top_down(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    let folder = pending.folder.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or("");
-                    c::label(
-                        ui,
-                        format!("Starting {} in {folder}… {}", pending.kind.display_name(), pending.seconds_left),
-                        12.0,
-                        Weight::Semibold,
-                        t::INK,
-                    );
-                    let mut job = egui::text::LayoutJob::single_section(
-                        pending.prompt.clone(),
-                        egui::TextFormat { font_id: t::font(11.0, Weight::Regular), color: t::MUTED, ..Default::default() },
-                    );
-                    job.wrap.max_width = text_width;
-                    job.wrap.max_rows = 2;
-                    ui.add(egui::Label::new(job));
+                    c::label(ui, title, 12.0, Weight::Semibold, t::INK);
+                    ui.add(egui::Label::new(prompt));
                 });
-                if c::text_button(ui, "Cancel", 11.5, Weight::Semibold, t::MUTED).clicked() {
+                if c::plain_button(ui, "Cancel", 11.5, Weight::Semibold, t::MUTED).clicked() {
                     cx.emit(UiAction::CancelAssistantTask);
                 }
-                if c::text_button(ui, "Start", 11.5, Weight::Semibold, t::AMBER).clicked() {
+                if c::plain_button(ui, "Start", 11.5, Weight::Semibold, t::AMBER).clicked() {
                     cx.emit(UiAction::StartAssistantTaskNow);
                 }
             });

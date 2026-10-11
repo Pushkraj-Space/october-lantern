@@ -195,8 +195,12 @@ pub fn bubble(ui: &mut Ui, cx: &mut Ctx, message: &ChatMessage, key: &str) {
                         .layout(Layout::top_down(Align::Min)),
                 );
                 child.set_clip_rect(ui.clip_rect().intersect(egui::Rect::from_min_size(start, egui::vec2(inner, limit))));
-                if let Some(code) = c::blocks(&mut child, source, egui::Id::new(key)) {
+                let actions = c::blocks_linked(&mut child, source, egui::Id::new(key));
+                if let Some(code) = actions.copy {
                     cx.emit(UiAction::Copy(code));
+                }
+                if let Some(link) = actions.link {
+                    cx.emit(UiAction::OpenUrl(link));
                 }
                 let full = child.min_rect().height();
                 ui.allocate_exact_size(egui::vec2(inner, full.min(limit)), Sense::hover());

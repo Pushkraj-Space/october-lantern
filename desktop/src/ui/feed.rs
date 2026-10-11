@@ -227,7 +227,16 @@ fn card(ui: &mut Ui, cx: &mut Ctx, agent: &Agent, is_new: bool) {
                         && !message.is_empty()
                     {
                         let expanded = cx.view.expanded_cards.contains(&agent.id);
-                        c::markdown(ui, message, MarkdownStyle { max_rows: if expanded { 40 } else { 5 }, ..Default::default() });
+                        if let Some(link) = c::markdown_linked(
+                            ui,
+                            message,
+                            MarkdownStyle { max_rows: if expanded { 40 } else { 5 }, ..Default::default() },
+                            0.0,
+                        )
+                        .1
+                        {
+                            cx.emit(UiAction::OpenUrl(link));
+                        }
                         if message.chars().count() > 280
                             && c::text_button(ui, if expanded { "Less" } else { "More" }, 11.0, Weight::Medium, t::MUTED).clicked()
                         {
