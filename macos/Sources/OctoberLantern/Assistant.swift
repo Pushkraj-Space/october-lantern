@@ -328,7 +328,7 @@ struct AskBox: View {
     }
 }
 
-/// Lantern's home (click the lantern): Ask Lantern, with what's waiting on you a click away.
+/// Lantern's home (click the lantern): Ask Lantern. What's waiting is on the stack button.
 struct AssistantHome: View {
     @ObservedObject var model: AppModel
     @ObservedObject var assistant = Assistant.shared
@@ -347,21 +347,6 @@ struct AssistantHome: View {
                             Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted).frame(width: 22, height: 22)
                         }
                         .buttonStyle(.plain).keyboardShortcut(.cancelAction).help("Close")
-                    }
-                    if !model.inbox.isEmpty {
-                        Button { model.panel = .inbox } label: {
-                            HStack(spacing: 8) {
-                                Circle().fill(Theme.amber).frame(width: 7, height: 7)
-                                Text(model.inbox.count == 1 ? "1 agent is waiting on you" : "\(model.inbox.count) agents are waiting on you")
-                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
-                            }
-                            .padding(.horizontal, 10).padding(.vertical, 7)
-                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.amber.opacity(0.12)))
-                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.amber.opacity(0.3)))
-                        }
-                        .buttonStyle(.plain)
                     }
                     if account.signedIn {
                         Text("Ask anything about your agents, or tell Lantern what to do and it starts an agent on it.")
