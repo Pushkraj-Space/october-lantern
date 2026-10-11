@@ -9,6 +9,9 @@ pub struct Assets {
     pub logo: TextureHandle,
     /// Swift's idle `.saturation(0.55)`; apply `.opacity(0.8)` when drawing.
     pub logo_idle: TextureHandle,
+    /// The lantern's silhouette, blurred: Welcome's `.shadow(color: amber.opacity(0.5), radius: 24)`.
+    /// The 96pt logo with 72pt (3 sigma) around it, 240 x 240; tint it with the shadow colour.
+    pub logo_shadow: TextureHandle,
     pub october: TextureHandle,
     pub desktop_hero: TextureHandle,
     pub google: TextureHandle,
@@ -33,6 +36,7 @@ impl Assets {
         );
         let logo_image = decode("logo", include_bytes!("../../../logo.png"));
         let logo = upload(ctx, "logo", &logo_image);
+        let logo_shadow = upload(ctx, "logo/shadow", &shadow(&logo_image));
         let mut idle = logo_image;
         for pixel in idle.pixels_mut() {
             let [r, g, b, _] = pixel.0;
@@ -44,6 +48,7 @@ impl Assets {
         Self {
             logo,
             logo_idle: upload(ctx, "logo/idle", &idle),
+            logo_shadow,
             october: texture(ctx, "october", include_bytes!("../../../macos/Resources/october.png")),
             desktop_hero: texture(ctx, "october/hero-palace", include_bytes!("../../../macos/Resources/october/hero-palace.jpg")),
             google: svg_texture(ctx, "brands/google", include_bytes!("../../../macos/Resources/brands/google.svg")),
@@ -56,6 +61,21 @@ impl Assets {
     pub fn harness(&self, kind: &AgentKind) -> Option<&TextureHandle> {
         self.harnesses.get(kind.as_str())
     }
+}
+
+/// Gaussian approximation of Welcome's `shadow(radius: 24)`, using sigma 24 at 1x.
+/// A 96pt logo is 96 px, padded 72 px (3 sigma) so its visible falloff has room to fade.
+/// The kernel is deterministic across our platforms; exact SwiftUI filter equivalence is unproven.
+fn shadow(logo: &image::RgbaImage) -> image::RgbaImage {
+    const LOGO: u32 = 96;
+    const PAD: u32 = 72;
+    let small = image::imageops::resize(logo, LOGO, LOGO, image::imageops::FilterType::Triangle);
+    // White everywhere, so blurring the colour channels never mixes in black at the edges.
+    let mut silhouette = image::RgbaImage::from_pixel(LOGO + 2 * PAD, LOGO + 2 * PAD, image::Rgba([255, 255, 255, 0]));
+    for (x, y, pixel) in small.enumerate_pixels() {
+        silhouette.put_pixel(x + PAD, y + PAD, image::Rgba([255, 255, 255, pixel.0[3]]));
+    }
+    image::imageops::blur(&silhouette, 24.0)
 }
 
 /// Canonical SVG brand marks rasterized once at 4x their 13pt display size. SVG parsing never
@@ -91,4 +111,18 @@ fn decode(name: &str, bytes: &[u8]) -> image::RgbaImage {
 fn upload(ctx: &egui::Context, name: &str, image: &image::RgbaImage) -> TextureHandle {
     let size = [image.width() as usize, image.height() as usize];
     ctx.load_texture(name, ColorImage::from_rgba_unmultiplied(size, image.as_raw()), TextureOptions::LINEAR)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_logo_shadow_is_a_soft_white_silhouette_with_room_to_fade() {
+        let logo = super::decode("logo", include_bytes!("../../../logo.png"));
+        let shadow = super::shadow(&logo);
+        assert_eq!(shadow.dimensions(), (240, 240));
+        assert!(shadow.pixels().all(|pixel| pixel.0[..3] == [255, 255, 255]));
+        let alpha = |x: u32, y: u32| shadow.get_pixel(x, y).0[3];
+        assert!(alpha(120, 120) > 64, "centre {}", alpha(120, 120));
+        assert!(alpha(0, 0) < 3 && alpha(239, 120) < 8, "edges {} {}", alpha(0, 0), alpha(239, 120));
+    }
 }

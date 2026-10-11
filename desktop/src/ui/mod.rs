@@ -16,6 +16,7 @@ mod markdown;
 mod october;
 mod sessions;
 pub mod theme;
+mod welcome;
 
 use crate::model::{AgentId, AgentKind, AppContext, Edge, Inputs, Model, PanelMode};
 use eframe::egui;
@@ -314,7 +315,7 @@ pub fn render_point_ask(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32) -> f32
 
 /// Welcome, 540 x 560.
 pub fn render_welcome(ui: &mut egui::Ui, cx: &mut Ctx) -> f32 {
-    placeholder(ui, cx, 560.0, "Welcome")
+    welcome::render(ui, cx)
 }
 
 /// Settings, 520 x 480.

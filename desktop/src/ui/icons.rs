@@ -45,6 +45,20 @@ pub enum Icon {
     Mail,
     Play,
     Exclamation,
+    /// SF `power` (Welcome: Open at login).
+    Power,
+    /// SF `bell.badge`.
+    BellBadge,
+    /// SF `bolt`.
+    Bolt,
+    /// SF `keyboard`.
+    Keyboard,
+    /// SF `arrow.right.to.line`.
+    ArrowToEdge,
+    /// SF `cursorarrow`.
+    Cursor,
+    /// SF `menubar.rectangle`.
+    MenuBar,
 }
 
 struct Pen<'a> {
@@ -316,5 +330,58 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.line(&[(3.0, 6.0), (12.0, 13.0), (21.0, 6.0)]);
         }
         Play => p.closed(&[(7.0, 3.0), (22.0, 12.0), (7.0, 21.0)], true),
+        Power => {
+            // A ring open at the top, with the stroke through the gap.
+            p.arc((12.0, 13.0), 8.5, -1.0, std::f32::consts::PI + 1.0);
+            p.line(&[(12.0, 2.5), (12.0, 12.0)]);
+        }
+        BellBadge => {
+            p.arc((11.0, 11.0), 6.0, std::f32::consts::PI, std::f32::consts::TAU);
+            p.line(&[(5.0, 11.0), (5.0, 16.0), (3.0, 18.5), (19.0, 18.5), (17.0, 16.0), (17.0, 11.0)]);
+            p.arc((11.0, 19.5), 2.5, 0.0, std::f32::consts::PI);
+            p.circle(19.5, 4.5, 3.5, true);
+        }
+        Bolt => p.closed(&[(14.0, 2.0), (4.0, 14.0), (11.5, 14.0), (10.0, 22.0), (20.0, 10.0), (12.5, 10.0)], false),
+        Keyboard => {
+            p.rect((2.0, 6.0), (22.0, 18.0), 2.5, false);
+            for y in [9.5, 12.5] {
+                for x in [6.0, 9.5, 13.0, 16.5] {
+                    p.circle(x + if y > 10.0 { 1.75 } else { 0.0 }, y, 0.9, true);
+                }
+            }
+            p.line(&[(8.0, 15.5), (16.0, 15.5)]);
+        }
+        ArrowToEdge => {
+            p.line(&[(2.0, 12.0), (17.0, 12.0)]);
+            p.line(&[(11.0, 6.0), (17.0, 12.0), (11.0, 18.0)]);
+            p.line(&[(21.0, 4.0), (21.0, 20.0)]);
+        }
+        Cursor => p.closed(&[(6.0, 3.0), (6.0, 19.0), (10.0, 15.0), (13.0, 21.5), (15.5, 20.5), (12.5, 14.0), (18.0, 14.0)], false),
+        MenuBar => {
+            p.rect((2.0, 4.0), (22.0, 20.0), 2.0, false);
+            p.rect((2.0, 4.0), (22.0, 8.5), 2.0, true);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn welcome_icons_stay_within_their_optical_boxes_at_both_display_sizes() {
+        let ctx = egui::Context::default();
+        for size in [13.0, 15.0, 26.0, 30.0] {
+            let rect = Rect::from_min_size(egui::pos2(10.0, 10.0), egui::Vec2::splat(size));
+            for icon in [Icon::Power, Icon::BellBadge, Icon::Bolt, Icon::Keyboard, Icon::ArrowToEdge, Icon::Cursor, Icon::MenuBar] {
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| paint_icon(ui.painter(), rect, icon, Color32::WHITE));
+                output.textures_delta.clear();
+                assert!(!output.shapes.is_empty(), "{icon:?}");
+                for clipped in output.shapes {
+                    let bounds = clipped.shape.visual_bounding_rect();
+                    assert!(bounds.is_finite() && rect.expand(0.1).contains_rect(bounds), "{icon:?} at {size}: {bounds:?}");
+                }
+            }
+        }
     }
 }

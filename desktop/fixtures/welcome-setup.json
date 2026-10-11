@@ -1,0 +1,11 @@
+{
+  "surface": "welcome",
+  "nowMs": 1790000000000,
+  "home": "/home/me",
+  "model": {
+    "system": {"hooks": {"claude": "needsUpdate", "codex": "on"}, "notifications_allowed": true},
+    "prefs": {"open_at_login": true, "notifications": true, "message_hotkey": "ctrl+alt+space"},
+    "caps": {"platform": "linux", "global_hotkeys": true}
+  },
+  "view": {"welcome_step": 1}
+}
