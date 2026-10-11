@@ -42,9 +42,11 @@ mod tests {
     use super::*;
     #[test]
     fn reads_live_wal_with_unusual_paths_and_refuses_writes() {
-        let dir = std::env::temp_dir().join(format!("lantern SQLite #? {}", uuid::Uuid::new_v4()));
+        // Characters a SQLite URI would misread. Windows doesn't allow `?` in file names.
+        let odd = if cfg!(windows) { "#%&" } else { "#?" };
+        let dir = std::env::temp_dir().join(format!("lantern SQLite {odd} {}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
-        let path = dir.join("agent ?.db");
+        let path = dir.join(format!("agent {odd}.db"));
         let writer = Connection::open(&path).unwrap();
         writer
             .execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE messages(id INTEGER, text TEXT); INSERT INTO messages VALUES(1,'hello');")
