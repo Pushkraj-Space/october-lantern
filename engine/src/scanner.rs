@@ -1,7 +1,6 @@
 //! Finds agent processes and works out what each one is doing.
 
 use std::collections::HashMap;
-use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
 use sysinfo::{Pid, System};
@@ -55,12 +54,40 @@ fn is_helper(kind: Kind, args: &[String]) -> bool {
 
 const INTERPRETERS: [&str; 5] = ["node", "bun", "deno", "python", "uv"];
 
+/// npm packages whose entry script doesn't carry the program's name. On Windows, npm starts an
+/// agent as `node …\node_modules\@anthropic-ai\claude-code\cli.js` (through a `claude.cmd`
+/// shim) rather than through a `claude` link.
+const NPM_PACKAGES: [(&str, &str); 8] = [
+    ("@anthropic-ai/claude-code", "claude"),
+    ("@openai/codex", "codex"),
+    ("@google/gemini-cli", "gemini"),
+    ("@qwen-code/qwen-code", "qwen"),
+    ("@github/copilot", "copilot"),
+    ("@sourcegraph/amp", "amp"),
+    ("@mariozechner/pi-coding-agent", "pi"),
+    ("opencode-ai", "opencode"),
+];
+
+/// The program a script run by an interpreter stands for.
+fn script_program(script: &str) -> &str {
+    if cfg!(windows) {
+        let path = script.replace('\\', "/").to_ascii_lowercase();
+        if let Some((_, prog)) = NPM_PACKAGES.iter().find(|(pkg, _)| path.contains(&format!("/node_modules/{pkg}/"))) {
+            return prog;
+        }
+    }
+    basename(script)
+}
+
 /// Classifies a process from argv. `node /path/to/codex ...` counts as codex.
 pub fn classify(p: &Proc) -> Option<Kind> {
     let argv0 = p.cmd.first().map(|a| basename(a)).unwrap_or(p.name.as_str());
     let wrapped = INTERPRETERS.iter().any(|i| argv0.starts_with(i));
-    let (prog, rest) =
-        if wrapped { (p.cmd.get(1).map(|a| basename(a))?, p.cmd.get(2..).unwrap_or(&[])) } else { (argv0, p.cmd.get(1..).unwrap_or(&[])) };
+    let (prog, rest) = if wrapped {
+        (p.cmd.get(1).map(|a| script_program(a))?, p.cmd.get(2..).unwrap_or(&[]))
+    } else {
+        (argv0, p.cmd.get(1..).unwrap_or(&[]))
+    };
     let kind = match Kind::from_program(prog) {
         // GitHub's Copilot CLI is a node program; a native `copilot` is AWS's deploy tool.
         Some(Kind::Copilot) if !wrapped => return None,
@@ -79,8 +106,55 @@ fn looks_like_id(s: &str) -> bool {
     s.len() >= 16 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
+/// Terminal apps on Windows, by executable name (lowercase, without `.exe`).
+#[cfg(windows)]
+const WINDOWS_TERMINALS: [(&str, &str); 11] = [
+    ("windowsterminal", "Windows Terminal"),
+    ("code", "VS Code"),
+    ("code - insiders", "VS Code Insiders"),
+    ("cursor", "Cursor"),
+    ("windsurf", "Windsurf"),
+    ("wezterm-gui", "WezTerm"),
+    ("alacritty", "Alacritty"),
+    ("tabby", "Tabby"),
+    ("conemu64", "ConEmu"),
+    ("hyper", "Hyper"),
+    ("mintty", "mintty"),
+];
+
+/// The terminal app above `pid`: Windows Terminal, VS Code... found among its parents or, when
+/// the console was handed to Windows Terminal, above its console host. A plain console window is
+/// its console host (`conhost.exe`), which owns that window.
+#[cfg(windows)]
+pub(crate) fn host_app(table: &ProcTable, pid: u32) -> Option<HostApp> {
+    let terminal = |p: &Proc| {
+        let name = basename(&p.name).to_ascii_lowercase();
+        WINDOWS_TERMINALS.iter().find(|(exe, _)| *exe == name).map(|(_, app)| *app)
+    };
+    let found = |chain: Vec<&Proc>| {
+        let i = chain.iter().position(|p| terminal(p).is_some())?;
+        // Electron apps run terminals in a helper process; the window belongs to the outermost
+        // process of the same program.
+        let outer = chain[i..].iter().take_while(|p| p.name == chain[i].name).last()?;
+        let exe = outer.exe.as_ref().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        Some(HostApp { app: terminal(chain[i])?.to_string(), pid: outer.pid, bundle_path: exe, canvas: None, node: None })
+    };
+    if let Some(host) = found(table.ancestors(pid)) {
+        return Some(host);
+    }
+    let console: u32 = table.get(pid)?.tty.as_deref()?.strip_prefix("con:")?.parse().ok()?;
+    let conhost = table.get(console)?;
+    let mut chain = vec![conhost];
+    chain.extend(table.ancestors(console));
+    found(chain).or_else(|| {
+        let exe = conhost.exe.as_ref().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        Some(HostApp { app: "Console".into(), pid: console, bundle_path: exe, canvas: None, node: None })
+    })
+}
+
 /// The first GUI app above `pid`, e.g. Terminal, iTerm2, Ghostty, cmux.
-fn host_app(table: &ProcTable, pid: u32) -> Option<HostApp> {
+#[cfg(unix)]
+pub(crate) fn host_app(table: &ProcTable, pid: u32) -> Option<HostApp> {
     table.ancestors(pid).into_iter().find_map(|p| {
         let exe = p.exe.as_ref()?.to_string_lossy().into_owned();
         let idx = exe.find(".app/Contents/")?;
@@ -136,6 +210,8 @@ impl Scanner {
         agents.sort_by_key(|(p, k)| (*k, p.pid));
 
         let tmux = if agents.is_empty() { None } else { Some(tmux::discover(&table)) };
+        // Lantern's own sessions (Windows).
+        let sessions = if agents.is_empty() { Vec::new() } else { crate::pty::sessions() };
         let events = read_events();
         let live: Vec<u32> = agents.iter().map(|(p, _)| p.pid).collect();
         // Keep open-file lookups for agents and their children (Codex's file is held by the child).
@@ -162,7 +238,15 @@ impl Scanner {
             }
 
             let tmux_pane = tmux.as_ref().and_then(|t| p.tty.as_ref().and_then(|tty| t.panes_by_tty.get(tty))).cloned();
+            // The agent a session started, or one running under it.
+            let started_by = |pid: u32, start: u64| pid == p.pid && start == p.start_time;
+            let session = sessions.iter().find(|s| {
+                started_by(s.child_pid, s.child_start)
+                    || table.ancestors(p.pid).iter().any(|a| a.pid == s.child_pid && a.start_time == s.child_start)
+            });
             let host = match &tmux_pane {
+                // Shown in a window only while attached, like a detached tmux session.
+                _ if session.is_some() => None,
                 Some(pane) => {
                     let session = pane.target.split(':').next().unwrap_or("").to_string();
                     tmux.as_ref().and_then(|t| t.clients.get(&(pane.socket.clone(), session))).and_then(|client| host_app(&table, *client))
@@ -174,7 +258,10 @@ impl Scanner {
                 h.canvas = self.environ(p.pid, "OCTOBER_BUS_CANVAS").filter(|c| is_canvas_id(c));
                 h.node = h.canvas.as_ref().and_then(|_| self.environ(p.pid, "OCTOBER_BUS_NODE")).filter(|n| n.len() <= 128);
             }
-            let route = self.route(p.pid, p.tty.as_deref(), tmux_pane.is_some(), host.as_ref());
+            let route = match session {
+                Some(s) => Route::Pty { session: s.name.clone() },
+                None => self.route(p.pid, p.tty.as_deref(), tmux_pane.is_some(), host.as_ref()),
+            };
             let cwd = p.cwd.as_ref().map(|c| c.to_string_lossy().into_owned());
             out.push(Agent {
                 id: format!("{}:{}:{}", kind.as_str(), p.pid, p.start_time),
@@ -399,7 +486,7 @@ impl Scanner {
         // unsupported agent.
         let Ok(metadata) = std::fs::metadata(&path) else { return Some(Vec::new()) };
         let Ok(modified) = metadata.modified() else { return Some(Vec::new()) };
-        let stamp = HistoryStamp::File(kind, path.clone(), metadata.ino(), metadata.len(), modified);
+        let stamp = HistoryStamp::File(kind, path.clone(), crate::platform::file_id(&metadata), metadata.len(), modified);
         if let Some((old, messages)) = self.history_cache.get(&agent.id)
             && *old == stamp
         {

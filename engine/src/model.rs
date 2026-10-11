@@ -169,6 +169,10 @@ pub enum Route {
     Iterm {
         tty: String,
     },
+    /// One of Lantern's own sessions on Windows (see pty.rs), by name.
+    Pty {
+        session: String,
+    },
     None,
 }
 

@@ -8,8 +8,10 @@
 //! Agents are started through the user's login shell (`$SHELL -lic`), so they get the same PATH
 //! and API keys as in a terminal they opened themselves.
 
+#[cfg(target_os = "macos")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -21,6 +23,7 @@ use crate::hooks::{now_ms, support_dir};
 use crate::model::{Kind, TmuxPane};
 use crate::tmux;
 
+#[cfg_attr(windows, allow(dead_code))]
 pub const LANTERN_SOCKET: &str = "lantern";
 
 const ALL: [Kind; 17] = [
@@ -61,8 +64,12 @@ pub fn program(kind: Kind) -> &'static str {
     }
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn shell() -> String {
-    std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into())
+    std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| if cfg!(target_os = "macos") { "/bin/zsh".into() } else { "/bin/bash".into() })
 }
 
 /// Single-quote for POSIX shells.
@@ -81,6 +88,12 @@ pub struct Installed {
 /// A shell whose startup files take longer than 10 s counts as finding nothing.
 pub fn installed() -> &'static Installed {
     static CACHE: OnceLock<Installed> = OnceLock::new();
+    #[cfg(windows)]
+    return CACHE.get_or_init(|| Installed {
+        kinds: ALL.iter().copied().filter(|k| crate::platform::find_on_path(program(*k)).is_some()).collect(),
+        tmux: false,
+    });
+    #[cfg(unix)]
     CACHE.get_or_init(|| {
         let names: Vec<&str> = ALL.iter().map(|k| program(*k)).collect();
         let script = format!("for c in {}; do command -v \"$c\" >/dev/null 2>&1 && echo \"$c\"; done", names.join(" "));
@@ -167,11 +180,14 @@ pub fn first_message(prompt: Option<&str>, extras: Extras) -> Option<String> {
         out.push_str(&format!("\n\n{n}"));
     }
     if let Some(t) = extras.toolkit.map(str::trim).filter(|t| !t.is_empty()) {
-        out.push_str(&format!("\n\nWhat this Mac already has (from Lantern's toolkit list; prefer these over installing new tools):\n{t}"));
+        out.push_str(&format!(
+            "\n\nWhat this computer already has (from Lantern's toolkit list; prefer these over installing new tools):\n{t}"
+        ));
     }
     Some(out)
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn agent_command(
     kind: Kind,
     cwd: &Path,
@@ -212,11 +228,12 @@ pub(crate) fn agent_command(
         (Some(p), Some(PromptArg::Option(flag))) => cmd.push_str(&format!(" {flag} {}", quote(p))),
         _ => {}
     }
-    format!("exec {} -lic {}", shell(), quote(&cmd))
+    format!("exec {} -lic {}", quote(&shell()), quote(&cmd))
 }
 
 /// Opens a new Terminal window running `script` (through a `.command` file, which needs no
 /// Automation permission).
+#[cfg(target_os = "macos")]
 fn open_in_terminal(name: &str, script: &str) -> Result<()> {
     let dir = support_dir().join("launch");
     std::fs::create_dir_all(&dir)?;
@@ -228,6 +245,162 @@ fn open_in_terminal(name: &str, script: &str) -> Result<()> {
         bail!("couldn't open Terminal");
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn open_in_terminal(_name: &str, script: &str) -> Result<()> {
+    crate::platform::open_terminal(script)
+}
+
+/// tmux sessions don't exist on Windows; Lantern's own sessions are opened by `pty::open_window`.
+#[cfg(windows)]
+fn open_in_terminal(_name: &str, _script: &str) -> Result<()> {
+    bail!("tmux sessions aren't available on Windows")
+}
+
+/// The program and arguments that start `kind` on Windows, run without a shell. An npm `.cmd`
+/// shim is unwrapped to Node and its script, so `cmd.exe` and its quoting never see the message.
+#[cfg(windows)]
+pub(crate) fn agent_argv(
+    kind: Kind,
+    prompt: Option<&str>,
+    screenshot: Option<&Path>,
+    model: Option<&str>,
+    bus: Option<&crate::bus::Attach>,
+) -> Result<(PathBuf, Vec<String>)> {
+    let name = program(kind);
+    let found = crate::platform::find_on_path(name).with_context(|| format!("{name} isn't on PATH"))?;
+    let ext = found.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let (program, mut args) = match ext.as_str() {
+        "exe" | "com" => (found, Vec::new()),
+        "cmd" | "bat" => {
+            let shim = std::fs::read_to_string(&found).unwrap_or_default();
+            let script = crate::pty::shim_script(&shim)
+                .map(|rel| found.parent().unwrap_or(Path::new(".")).join(rel))
+                .filter(|p| p.is_file())
+                .with_context(|| format!("{} is a batch file Lantern can't run safely; install {name}'s own .exe", found.display()))?;
+            let bundled = found.with_file_name("node.exe");
+            let node = if bundled.is_file() { bundled } else { crate::platform::find_on_path("node").context("Node.js isn't on PATH")? };
+            (node, vec![script.to_string_lossy().into_owned()])
+        }
+        _ => bail!("Lantern can't start {}", found.display()),
+    };
+    if let Some(b) = bus {
+        args.extend(b.args.iter().cloned());
+    }
+    if let (Some(m), Some(flag)) = (model, crate::models::flag(kind)) {
+        args.extend([flag.to_string(), m.to_string()]);
+    }
+    if let Some(s) = screenshot {
+        let dir = s.parent().unwrap_or(s).to_string_lossy().into_owned();
+        match kind {
+            Kind::Claude => args.extend(["--add-dir".into(), dir]),
+            Kind::Codex => args.extend(["--image".into(), s.to_string_lossy().into_owned()]),
+            Kind::Gemini => args.extend(["--include-directories".into(), dir]),
+            _ => {}
+        }
+    }
+    if kind == Kind::Claude {
+        args.extend(["--session-id".into(), uuid::Uuid::new_v4().hyphenated().to_string()]);
+    }
+    match (prompt, prompt_arg(kind)) {
+        (Some(p), Some(PromptArg::Positional)) => args.extend(["--".into(), p.to_string()]),
+        (Some(p), Some(PromptArg::Option(flag))) => args.extend([flag.to_string(), p.to_string()]),
+        _ => {}
+    }
+    // On October Bus, some agents run under a wrapper (the October harness under `october-bus
+    // agent run ... --`).
+    match bus.map(|b| b.wrap.as_slice()) {
+        Some([wrapper, rest @ ..]) => {
+            let mut wrapped: Vec<String> = rest.to_vec();
+            wrapped.push(program.to_string_lossy().into_owned());
+            wrapped.extend(args);
+            Ok((PathBuf::from(wrapper), wrapped))
+        }
+        _ => Ok((program, args)),
+    }
+}
+
+/// One of Lantern's own sessions (pty.rs), shown in a terminal window or left in the background.
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn launch_session(
+    kind: Kind,
+    cwd: &Path,
+    prompt: Option<&str>,
+    screenshot: Option<&Path>,
+    model: Option<&str>,
+    bus: Option<crate::bus::Attach>,
+    bus_problem: Option<String>,
+    mode: Mode,
+    deadline: Instant,
+) -> Result<Launched> {
+    let (program, args) = agent_argv(kind, prompt, screenshot, model, bus.as_ref())?;
+    let project = cwd.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    let safe: String = project.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(24).collect();
+    let session = format!("{}-{}-{}", kind.as_str(), safe, now_ms() % 100_000);
+    check_launch_deadline(deadline)?;
+    let env = bus.as_ref().map(|b| b.env.clone()).unwrap_or_default();
+    let spec = crate::pty::Spec { cwd: cwd.to_path_buf(), program, args, env };
+    crate::pty::start(&session, &spec)?;
+    if let Some(b) = &bus {
+        crate::bus::link_when_ready(b.id.clone());
+    }
+    if mode == Mode::Terminal {
+        crate::pty::open_window(&session)?;
+    }
+    if let Some(p) = prompt.filter(|_| !takes_prompt_arg(kind)) {
+        type_first_prompt_in_session(&session, kind, p).context("the session started, but its first message wasn't sent")?;
+    }
+    Ok(Launched { session: Some(session), bus_problem })
+}
+
+/// `type_first_prompt` for a Lantern session: once the agent runs in it and its screen settles.
+#[cfg(windows)]
+fn type_first_prompt_in_session(session: &str, kind: Kind, text: &str) -> Result<()> {
+    use crate::model::Route;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let (mut last, mut steady, mut up_since) = (String::new(), 0, None::<Instant>);
+    let mut processes = sysinfo::System::new();
+    let mut cache = crate::procs::ProcCache::default();
+    loop {
+        if Instant::now() >= deadline {
+            bail!("{} didn't finish starting within 30 s; type your message in its window", program(kind));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        let info = crate::pty::info(session)?;
+        if !info.alive {
+            bail!("{} exited", program(kind));
+        }
+        let table = crate::procs::ProcTable::capture(&mut processes, &mut cache);
+        let route = Route::Pty { session: session.into() };
+        let agent = table
+            .procs
+            .values()
+            .filter(|p| p.pid == info.child_pid || table.ancestors(p.pid).iter().any(|a| a.pid == info.child_pid))
+            .find_map(|p| {
+                let live = crate::procs::live(p.pid)?;
+                let agent = startup_agent(kind, p, &live, route.clone(), None)?;
+                let ancestors: Vec<u32> = table.ancestors(p.pid).iter().map(|a| a.pid).collect();
+                crate::deliver::check_session(&agent, &live, &info, &ancestors).ok().map(|_| agent)
+            });
+        let Some(agent) = agent else {
+            steady = 0;
+            up_since = None;
+            continue;
+        };
+        let up = *up_since.get_or_insert_with(Instant::now);
+        let screen = crate::pty::capture(session)?;
+        if !screen.trim().is_empty() && screen == last {
+            steady += 1;
+        } else {
+            steady = 0;
+            last = screen;
+        }
+        if steady >= 3 || up.elapsed() >= Duration::from_secs(5) {
+            return crate::deliver::send_text(&agent, text);
+        }
+    }
 }
 
 pub fn launch(
@@ -283,9 +456,30 @@ pub fn launch(
     let message = first_message(prompt.map(str::trim).filter(|p| !p.is_empty()), extras);
     let prompt = message.as_deref();
 
+    #[cfg(unix)]
+    let launched = launch_tmux(kind, cwd, prompt, screenshot, model, bus, bus_problem, mode, deadline);
+    #[cfg(windows)]
+    let launched = launch_session(kind, cwd, prompt, screenshot, model, bus, bus_problem, mode, deadline);
+    launched
+}
+
+/// A tmux session on Lantern's own server, or (without tmux) the agent in a new terminal window.
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
+fn launch_tmux(
+    kind: Kind,
+    cwd: &Path,
+    prompt: Option<&str>,
+    screenshot: Option<&Path>,
+    model: Option<&str>,
+    bus: Option<crate::bus::Attach>,
+    bus_problem: Option<String>,
+    mode: Mode,
+    deadline: Instant,
+) -> Result<Launched> {
     if !installed().tmux {
         if mode == Mode::Background {
-            bail!("background sessions need tmux (brew install tmux)");
+            bail!("background sessions need tmux; install it using your system package manager");
         }
         if prompt.is_some() && !takes_prompt_arg(kind) {
             bail!("Without tmux, Lantern can't hand {} a first message. Leave the message empty, or install tmux.", program(kind));
@@ -339,12 +533,25 @@ pub(crate) fn check_launch_deadline(deadline: Instant) -> Result<()> {
 
 /// Build a delivery target only from the expected program's current process identity. This
 /// intentionally does not scan session files: startup readiness needs no transcript/history.
+#[cfg_attr(windows, allow(dead_code))]
 fn startup_owner(kind: Kind, p: &crate::procs::Proc, live: &crate::procs::Live, pane: &TmuxPane) -> Option<crate::model::Agent> {
-    use crate::model::{Agent, Route, SessionMatch, State, StateSource};
+    let agent = startup_agent(kind, p, live, crate::model::Route::Tmux, Some(pane.clone()))?;
+    crate::deliver::check(&agent, live).ok().map(|_| agent)
+}
+
+/// The agent to type a first message into: the expected program, as it runs right now.
+fn startup_agent(
+    kind: Kind,
+    p: &crate::procs::Proc,
+    live: &crate::procs::Live,
+    route: crate::model::Route,
+    tmux: Option<TmuxPane>,
+) -> Option<crate::model::Agent> {
+    use crate::model::{Agent, SessionMatch, State, StateSource};
     if crate::scanner::classify(p) != Some(kind) || p.exe.as_ref().and_then(|e| e.to_str()) != live.exe.as_deref() {
         return None;
     }
-    let agent = Agent {
+    Some(Agent {
         id: format!("{}:{}:{}", kind.as_str(), p.pid, p.start_time),
         kind,
         handle: kind.as_str().into(),
@@ -368,16 +575,16 @@ fn startup_owner(kind: Kind, p: &crate::procs::Proc, live: &crate::procs::Live, 
         source: None,
         live: true,
         host: None,
-        tmux: Some(pane.clone()),
+        tmux,
         can_reply: true,
-        route: Route::Tmux,
+        route,
         state_source: StateSource::None,
-    };
-    crate::deliver::check(&agent, live).ok().map(|_| agent)
+    })
 }
 
 /// Waits for the expected interactive harness in this pane's foreground and a settled screen.
 /// Delivery rechecks the process identity and pane immediately before typing.
+#[cfg_attr(windows, allow(dead_code))]
 fn type_first_prompt(pane: &TmuxPane, kind: Kind, text: &str) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(30);
     let (mut last, mut steady, mut up_since) = (String::new(), 0, None::<Instant>);

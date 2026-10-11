@@ -11,3 +11,5 @@
 
 # Private notes, migrations and infrastructure docs (never pushed)
 /_internal/
+
+desktop/target/

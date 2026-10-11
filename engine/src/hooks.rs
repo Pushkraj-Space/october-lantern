@@ -21,7 +21,7 @@ use crate::model::{QuestionKind, SessionStatus, State, truncate};
 use crate::transcripts::home;
 
 pub fn support_dir() -> PathBuf {
-    home().join("Library/Application Support/October Lantern")
+    crate::platform::data_dir("October Lantern")
 }
 
 pub fn events_dir() -> PathBuf {
@@ -281,7 +281,7 @@ pub fn read_events() -> Vec<HookEvent> {
 const CLAUDE_EVENTS: [&str; 6] = ["PermissionRequest", "Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure"];
 
 fn hook_binary() -> PathBuf {
-    support_dir().join("bin/lantern-engine")
+    support_dir().join("bin").join(format!("lantern-engine{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// Hooks run Lantern's own copy of the engine, so moving, updating or deleting the app never
@@ -293,8 +293,34 @@ fn install_hook_binary() -> Result<PathBuf> {
     let tmp = dest.with_extension("new");
     let _ = fs::remove_file(&tmp);
     fs::copy(&exe, &tmp)?;
+    if cfg!(windows) {
+        // A running program can't be replaced on Windows, but it can be renamed: move the old
+        // copy aside (an agent's hook may be running it) and clear out ones no longer running.
+        let bin = dest.parent().unwrap();
+        for old in fs::read_dir(bin).into_iter().flatten().flatten() {
+            if old.file_name().to_string_lossy().starts_with("lantern-engine.old-") {
+                let _ = fs::remove_file(old.path());
+            }
+        }
+        if dest.exists() {
+            fs::rename(&dest, bin.join(format!("lantern-engine.old-{}", uuid::Uuid::new_v4().simple())))?;
+        }
+    }
     fs::rename(&tmp, &dest)?;
     Ok(dest)
+}
+
+/// Lantern's own copy of the engine, up to date with this one, for programs that outlive the app
+/// (hooks, and Lantern's sessions on Windows): an update or reinstall never has to replace a
+/// program that's running.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn engine_copy() -> Result<PathBuf> {
+    let dest = hook_binary();
+    let exe = std::env::current_exe()?.canonicalize()?;
+    if exe == dest || (dest.exists() && fs::read(&exe).ok() == fs::read(&dest).ok()) {
+        return Ok(dest);
+    }
+    install_hook_binary()
 }
 
 /// Keeps the hooks' copy of the engine in step with the app (called when the app starts).
@@ -312,18 +338,34 @@ pub fn refresh_hook_binary() {
     }
 }
 
+/// The Claude Code hook command. On Windows it has to work whether Claude Code runs it in Git Bash
+/// or in Command Prompt, so it is just the quoted program (no `\`, `"` or `$` can appear in it).
+#[cfg(windows)]
+pub(crate) fn claude_hook_command(engine: &Path) -> String {
+    format!("\"{}\" hook claude", engine.display())
+}
+
+/// The Codex `notify` program; Codex appends the event JSON as the last argument.
+#[cfg(windows)]
+pub(crate) fn codex_notify_command(engine: &Path) -> Vec<String> {
+    vec![engine.to_string_lossy().into_owned(), "hook".into(), "codex".into()]
+}
+
 /// The Claude Code hook command: does nothing (successfully) if Lantern has been removed.
+#[cfg(unix)]
 pub(crate) fn claude_hook_command(engine: &Path) -> String {
     let q = shell_quote(engine);
     format!("[ -x {q} ] && {q} hook claude; exit 0")
 }
 
 /// The Codex `notify` program. Codex appends the event JSON as the last argument, which becomes $1.
+#[cfg(unix)]
 pub(crate) fn codex_notify_command(engine: &Path) -> Vec<String> {
     let q = shell_quote(engine);
     vec!["/bin/sh".into(), "-c".into(), format!("[ -x {q} ] && exec {q} hook codex \"$1\"; exit 0"), "lantern-engine-notify".into()]
 }
 
+#[cfg(unix)]
 fn shell_quote(p: &Path) -> String {
     format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"))
 }
@@ -381,10 +423,9 @@ pub(crate) fn backup(path: &Path) -> Result<Option<PathBuf>> {
 struct SettingsLock(#[allow(dead_code)] fs::File);
 
 fn lock_settings() -> Result<SettingsLock> {
-    use std::os::fd::AsRawFd;
     fs::create_dir_all(support_dir())?;
     let f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(support_dir().join("hooks.lock"))?;
-    if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
+    if f.lock().is_err() {
         bail!("couldn't lock Lantern's hook settings");
     }
     Ok(SettingsLock(f))

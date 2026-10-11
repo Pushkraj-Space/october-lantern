@@ -120,13 +120,14 @@ impl Executor {
     }
 }
 
-/// One worker per terminal: a tmux pane, a cmux surface, a tty, or an October node.
+/// One worker per terminal: a tmux pane, a cmux surface, a tty, an October node, or a Lantern session.
 fn destination(agent: &Agent) -> String {
     match &agent.route {
         Route::Tmux => agent.tmux.as_ref().map(|p| format!("tmux:{:?}:{}", p.socket, p.pane_id)).unwrap_or_else(|| agent.id.clone()),
         Route::Cmux { surface, .. } => format!("cmux:{surface}"),
         Route::Terminal { tty } | Route::Iterm { tty } => format!("tty:{tty}"),
         Route::October { node_id, .. } => format!("october:{node_id}"),
+        Route::Pty { session } => format!("pty:{session}"),
         Route::None => agent.id.clone(),
     }
 }

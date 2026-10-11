@@ -29,7 +29,7 @@ Sent when anything changes, and at least every 10 seconds.
 | `handle` | string | Display handle, e.g. `"claude-2"`. Numbered per kind. A number stays with its agent for the agent's whole life, and a new agent takes the lowest free number. |
 | `pid` | number | |
 | `startTime` | number | Seconds since the epoch when the process started. Delivery checks the process still has it. |
-| `tty` | string? | e.g. `"ttys004"` |
+| `tty` | string? | e.g. `"ttys004"`, `"pts/3"`; on Windows `"con:<pid>"`, the agent's console host (one per console window or terminal tab) |
 | `cwd` | string? | Current working directory |
 | `project` | string? | Last path component of `cwd` |
 | `title` | string? | Session title (Claude's `ai-title`, or the first prompt in a Codex session) |
@@ -45,7 +45,7 @@ Sent when anything changes, and at least every 10 seconds.
 | `host` | `{ "app": string, "pid": number, "bundlePath": string }?` | The GUI app the agent runs inside (Terminal, iTerm2, Ghostty, cmux, ...) |
 | `tmux` | `{ "socket": string?, "target": string, "paneId": string }?` | Present when the agent runs inside a tmux pane |
 | `canReply` | bool | `true` when the engine can type a reply into the agent (`route.via` isn't `none`) |
-| `route` | object | How replies reach the agent. `{"via":"tmux"}`, `{"via":"cmux","workspace":"…","surface":"…"}`, `{"via":"terminal","tty":"/dev/ttys004"}`, `{"via":"iterm","tty":"…"}`, `{"via":"october","canvasId":"…","nodeId":"…"}` (through October Desktop, when Lantern is connected to it) or `{"via":"none"}`. Single keys (`keys`) work for tmux, cmux and iterm. |
+| `route` | object | How replies reach the agent. `{"via":"tmux"}`, `{"via":"cmux","workspace":"…","surface":"…"}`, `{"via":"terminal","tty":"/dev/ttys004"}`, `{"via":"iterm","tty":"…"}`, `{"via":"october","canvasId":"…","nodeId":"…"}` (through October Desktop, when Lantern is connected to it), `{"via":"pty","session":"…"}` (one of Lantern's own sessions on Windows) or `{"via":"none"}`. Single keys (`keys`) work for tmux, cmux, iterm and pty. |
 | `stateSource` | `"hook" \| "transcript" \| "none"` | Where the state came from ("transcript" covers every session reader) |
 
 ### `installed`
@@ -200,3 +200,42 @@ Identity and paired phones are stored in `~/Library/Application Support/October 
 - `devices.json` holds only a SHA-256 hash of each phone's credential.
 
 Phone deliveries are polled on the host loop rather than waited on there (maximum 16 pending deliveries). Requests for other phones, pings and local stop/revoke commands remain available during a slow delivery. Cancel frames cancel the matching request on the current phone connection if typing has not begun. Disconnect/revoke/stop cancel outstanding unstarted operations. Retries sharing an in-flight idempotency key share the original operation and its eventual result, with up to eight response waiters; changing the request under that key is refused.
+
+## Linux client and paths
+
+`desktop/` is a native Rust UI that starts `lantern-engine serve` as a sidecar;
+it uses protocol version 3 unchanged. Keep the UI and engine executable together,
+or set `LANTERN_ENGINE` to an explicit engine path. On Linux, support files (events,
+phone identity, toolkit, launch artifacts) live in
+`${XDG_DATA_HOME:-~/.local/share}/october-lantern` rather than the macOS Library.
+Process identity, controlling tty (`pts/N`), foreground process group and open
+session files come from procfs. Direct replies use tmux with the existing safety
+checks. Terminal launch/attach uses a supported Linux terminal emulator.
+
+## Windows
+
+The same `desktop/` and engine build for Windows. Support files live in
+`%LOCALAPPDATA%\October Lantern`. Processes come from a Toolhelp snapshot; a process's
+`tty` is `con:<pid>` of its console host (`conhost.exe`, or `OpenConsole.exe` behind a
+Windows Terminal or VS Code tab). Windows has no foreground process group, so for an
+agent in an ordinary terminal the delivery check can't confirm the agent is in front:
+`reply` and `keys` are refused, `route` is `{"via":"none"}`, and `focus` brings the
+`host` app's window to the front.
+
+`launch` starts the agent in one of Lantern's own sessions instead of tmux: a detached
+`lantern-engine pty-host <name>` runs it in a pseudo console (ConPTY) and records itself
+in `pty/<name>.json` in the support folder. The agent runs directly, not through a shell
+or `cmd.exe` (an npm `.cmd` shim is unwrapped to Node and its script), so the prompt is
+passed as one argument, and the session ends when the agent exits. Its agents have
+`route` `{"via":"pty","session":"<name>"}` and no `host`. Before typing, the engine asks
+the host about its agent: the target must be the process the session started (or run
+under it), with the same start time and program, alive, and on the session's console.
+`focus`/`attach` bring a window showing the session forward or open a new one
+(`lantern-engine attach <name>`, in Windows Terminal when installed). `background: false`
+also opens that window when the session starts.
+
+Sessions, their windows and October Bus run from copies in the support folder's `bin`
+(`lantern-engine.exe`, the hooks' copy, and `october-bus-<commit>.exe`, copied from the
+bundled `october-bus.exe`), so updating or reinstalling the app never replaces a running
+program. `launch` with `bus: true` passes the Bus's arguments, environment and wrapper to the
+agent as separate arguments, with no shell quoting.

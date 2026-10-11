@@ -2,6 +2,18 @@
 
 **A small glowing lantern on the edge of your screen that watches every AI coding agent on your Mac and lights up when one of them needs you.**
 
+**Platform scope:** the edge overlay and Mac integrations below describe the Swift
+macOS app. Linux now has a native Rust desktop client with a Rust engine sidecar:
+agent discovery, Markdown history, tmux replies, permission controls, model selection,
+session launching, local dictation, portal screenshots and shortcuts, notifications,
+settings, October account/phone controls, Point & Ask, and an optional GNOME edge
+extension. Desktop and account-dependent features need their corresponding setup;
+live phone/cloud flows remain unverified here. See the [Linux build instructions](../README.md#linux-rust-ui--rust-engine-sidecar).
+The same Rust desktop builds for Windows as a preview: discovery, history, focus,
+tray, notifications, hooks, replies to sessions Lantern starts in its own ConPTY
+sessions, Bus, screenshots, dictation, updates and an installer (see the
+[Windows build instructions](../README.md#windows-preview)).
+
 People now run several coding agents at once (Claude Code in one terminal, Codex in another, Pi or OpenCode in a third), and each one keeps stopping to say "done" or to ask something. The only way to find out is to click through every window. October Lantern sits on the edge of your screen, finds all of those agents by itself, shows which ones are waiting on you and what they said, and lets you answer them without hunting for the right window.
 
 Lantern is part of the **October** family. October Desktop is the flagship workspace for running teams of agents; `october-harness` and `october-bus` are its agent and messaging layers. Lantern is the small, free-standing entry point: a light download that's useful on its own, and will get more capable when October Desktop is installed (see [Roadmap](#roadmap)).
@@ -159,7 +171,8 @@ Lantern is in **beta (v0.4.2)**.
 | Sign in with an October account (Google, GitHub, Apple, email) | ✅ |
 | Connect to October Desktop | ✅ Read-only with any October version that runs october-core (lists October's terminals). Full connection (October's agent names and questions, replies through October's safe delivery, Open on the canvas) needs October 1.0.52 or later, after the user clicks Connect and allows Lantern in October. |
 | October phone app | ⚠️ Built, not yet tested against the real phone app and relay: sign in, then pair the phone by QR. Needs a plan that includes mobile. Lantern appears as its own computer on the October account. Treat as experimental until a live pairing and reply have been confirmed. |
-| Windows or Linux | ❌ Not yet |
+| Linux | ✅ Native Rust UI + Rust engine sidecar. Sessions, model selection, toolkit/Bus, local speech, portal screenshots/shortcuts, notifications, preferences, compact/tray and optional GNOME edge UI. Account/phone/Point & Ask controls implemented; live services require end-to-end verification. Native updater needs published Linux assets. |
+| Windows | ⚠️ Preview from source. Finds agents in Windows Terminal, VS Code and console windows, shows state and conversations, brings the terminal window to the front; tray, notifications, Ctrl+Alt+L, hooks, Credential Manager sign-in. Starts sessions in Lantern's own ConPTY sessions (shown in Windows Terminal or a console window) and replies and answers Allow/Deny there; agents started elsewhere are followed, not typed into. October Bus, screenshots of the display under the pointer, local dictation, in-app updates, and a per-user installer. Built and tested in CI; not yet tried by hand on Windows. |
 | Pricing | The core app is free forever. No account needed; signing in to October is optional. A paid October plan adds its extras, like cloud agents, automatically after sign-in. Multiplayer: coming soon (no date). |
 
 ## Privacy
@@ -335,6 +348,7 @@ scripts/publish.sh "Release notes in one paragraph"
 | Path | What |
 |---|---|
 | `engine/` | Rust engine: agent detection, session readers, hooks, delivery, launching |
+| `desktop/` | Portable native Rust UI; uses the shared engine over stdio. |
 | `macos/` | Swift package for the macOS app. `Resources/` holds the app icon and logos. |
 | `protocol/` | The message protocol between the app and the engine |
 | `scripts/` | Build, release, publish and icon scripts |

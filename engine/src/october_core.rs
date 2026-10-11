@@ -25,16 +25,27 @@ use serde_json::{Value, json};
 use sha2::Sha256;
 
 use crate::hooks::now_ms;
-use crate::transcripts::home;
 
 const API_VERSION: u64 = 2;
 
 fn runtime_dir() -> PathBuf {
-    home().join("Library/Application Support/October/core/runtime")
+    if cfg!(target_os = "macos") {
+        return crate::platform::data_dir("October").join("core/runtime");
+    }
+    // October Desktop follows Electron's app.getPath("userData") on Linux.
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| crate::transcripts::home().join(".config"))
+        .join("October/core/runtime")
 }
 
 pub fn installed() -> bool {
-    std::path::Path::new("/Applications/October.app").exists() || home().join("Library/Application Support/October").exists()
+    if cfg!(target_os = "macos") {
+        std::path::Path::new("/Applications/October.app").exists() || crate::platform::data_dir("October").exists()
+    } else {
+        runtime_dir().exists()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,8 +62,7 @@ pub struct RunFile {
 pub fn discover() -> Option<RunFile> {
     let path = runtime_dir().join("core-run.json");
     let meta = std::fs::symlink_metadata(&path).ok()?;
-    use std::os::unix::fs::PermissionsExt;
-    if !meta.is_file() || meta.permissions().mode() & 0o077 != 0 {
+    if !meta.is_file() || !crate::platform::is_private(&meta) {
         return None;
     }
     let v: Value = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
@@ -61,9 +71,9 @@ pub fn discover() -> Option<RunFile> {
     }
     let address = v["address"].as_str()?.to_string();
     let port_ok = address.strip_prefix("127.0.0.1:").and_then(|p| p.parse::<u16>().ok()).is_some();
-    let pid = v["pid"].as_i64()? as i32;
+    let pid = u32::try_from(v["pid"].as_i64()?).ok()?;
     // The process must still be alive.
-    if !port_ok || unsafe { libc::kill(pid, 0) } != 0 {
+    if !port_ok || !crate::platform::alive(pid) {
         return None;
     }
     Some(RunFile {
@@ -307,7 +317,7 @@ impl Client {
                 true,
             )?;
         }
-        let _ = std::process::Command::new("/usr/bin/open").arg(format!("october://canvas/{}", a.canvas_id)).status();
+        let _ = crate::platform::open_url(&format!("october://canvas/{}", a.canvas_id), std::time::Duration::from_secs(5));
         Ok(())
     }
 }

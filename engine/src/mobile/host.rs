@@ -904,18 +904,26 @@ fn describe(e: &anyhow::Error) -> String {
 }
 
 fn computer_name() -> String {
-    crate::run::output(std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]), Duration::from_secs(3))
+    let mut cmd = std::process::Command::new(if cfg!(target_os = "macos") { "/usr/sbin/scutil" } else { "hostname" });
+    if cfg!(target_os = "macos") {
+        cmd.args(["--get", "ComputerName"]);
+    }
+    crate::run::output(&mut cmd, Duration::from_secs(3))
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
         .map(|s| format!("{s} (Lantern)"))
-        .unwrap_or_else(|| "Mac (Lantern)".into())
+        .unwrap_or_else(|| format!("{} (Lantern)", std::env::consts::OS))
 }
 
 fn machine_model() -> String {
-    crate::run::output(std::process::Command::new("/usr/sbin/sysctl").args(["-n", "hw.model"]), Duration::from_secs(3))
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default()
+    if cfg!(windows) {
+        // No `uname` on Windows; the architecture is what `uname -m` gives elsewhere.
+        return std::env::consts::ARCH.into();
+    }
+    let mut cmd = std::process::Command::new(if cfg!(target_os = "macos") { "/usr/sbin/sysctl" } else { "uname" });
+    cmd.args(if cfg!(target_os = "macos") { &["-n", "hw.model"][..] } else { &["-m"][..] });
+    crate::run::output(&mut cmd, Duration::from_secs(3)).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
 }
 
 #[cfg(test)]

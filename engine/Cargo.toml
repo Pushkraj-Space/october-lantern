@@ -10,7 +10,6 @@ base64 = "0.23.1"
 ed25519-dalek = "3.0.0"
 getrandom = "0.4.3"
 hmac = "0.13.0"
-libc = "0.2.189"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
@@ -22,6 +21,28 @@ toml_edit = "0.25.15"
 tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 ureq = { version = "3.4.2", features = ["json"] }
 uuid = { version = "1.26.1", features = ["v4"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "hooks", "limits"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+
+[target.'cfg(windows)'.dependencies]
+# Renders a Lantern session's screen, for reading it back and redrawing it on attach.
+vt100 = "0.16"
+windows-sys = { version = "0.61", features = [
+    "Wdk_System_Threading",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 # Only the Noise interoperability test derives libsodium-style seed keys.

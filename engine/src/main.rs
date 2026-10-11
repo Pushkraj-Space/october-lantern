@@ -18,11 +18,14 @@ mod model;
 mod models;
 mod october_core;
 mod october_link;
+mod platform;
 mod procs;
+mod pty;
 mod readers;
 mod run;
 mod scanner;
 mod serve;
+mod sqlite;
 #[cfg(test)]
 mod tests;
 mod tmux;
@@ -35,6 +38,11 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("serve") => serve::run(),
+        // Lantern's own terminal sessions on Windows (see pty.rs).
+        #[cfg(windows)]
+        Some("pty-host") => pty::host(args.get(1).map(String::as_str).unwrap_or("")),
+        #[cfg(windows)]
+        Some("attach") => pty::attach(args.get(1).map(String::as_str).unwrap_or("")),
         Some("agents") | None => {
             let agents = scanner::Scanner::new().scan();
             println!("{}", serde_json::to_string_pretty(&agents)?);

@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -21,9 +20,7 @@ pub(crate) const MESSAGE_CHARS: usize = 2000;
 /// Parsed session files nobody has asked about for this long are dropped from the cache.
 const CACHE_IDLE: Duration = Duration::from_secs(600);
 
-pub fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
-}
+pub use crate::platform::home;
 
 fn file_stamp(path: &Path) -> Option<(u64, u64)> {
     let meta = fs::metadata(path).ok()?;
@@ -219,12 +216,8 @@ pub(crate) fn parse_claude(path: &Path, mtime: u64) -> SessionStatus {
 }
 
 fn codex_open_rollout(pid: u32) -> Option<PathBuf> {
-    let out = crate::run::output(Command::new("/usr/sbin/lsof").args(["-p", &pid.to_string(), "-Fn"]), Duration::from_secs(3)).ok()?;
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.strip_prefix('n'))
-        .filter(|p| p.contains("/.codex/sessions/") && p.ends_with(".jsonl"))
-        .map(PathBuf::from)
+    crate::apps::codex_open_rollouts(pid)
+        .into_iter()
         .filter_map(|p| file_stamp(&p).map(|(m, _)| (m, p)))
         .max_by_key(|(m, _)| *m)
         .map(|(_, p)| p)

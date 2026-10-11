@@ -1,0 +1,71 @@
+name: Windows release bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified Windows zip to this repository's release
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    env:
+      LANTERN_RELEASES_REPO: ${{ github.repository }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}\build\target
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine -> ../build/target
+            desktop -> ../build/target
+      - run: pwsh -File scripts/check.ps1
+      - run: pwsh -File scripts/build-windows.ps1
+      - run: pwsh -File scripts/build-bus-windows.ps1
+      - run: python scripts/smoke-windows.py --bus
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Package (signed when a certificate is configured)
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: pwsh -File scripts/package-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: October-Lantern-windows-x86_64
+          path: |
+            build/October-Lantern-windows-x86_64.zip
+            build/October-Lantern-windows-x86_64.zip.sha256
+            build/October-Lantern-windows-x86_64-setup.exe
+            build/October-Lantern-windows-x86_64-setup.exe.sha256
+      - name: Publish when explicitly requested
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(python -c 'import tomllib; print(tomllib.load(open("engine/Cargo.toml", "rb"))["package"]["version"])')"
+          notes="$(mktemp)"
+          cat > "$notes" <<'NOTES'
+          Windows preview: install with October-Lantern-windows-x86_64-setup.exe (no administrator
+          rights needed). Lantern finds agents in Windows Terminal, VS Code and console windows,
+          starts sessions you can reply to, and includes October Bus, screenshots, local dictation
+          (after scripts/setup-dictation.ps1) and in-app updates. See the README for details.
+          NOTES
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "October Lantern $tag" --notes-file "$notes"
+          gh release upload "$tag" build/October-Lantern-windows-x86_64.zip build/October-Lantern-windows-x86_64.zip.sha256 \
+            build/October-Lantern-windows-x86_64-setup.exe build/October-Lantern-windows-x86_64-setup.exe.sha256
+          rm -f "$notes"

@@ -11,8 +11,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -66,14 +64,13 @@ pub fn claude_live() -> HashMap<u32, ClaudeLive> {
 /// Every Codex rollout a process holds open (the Codex app's app-server holds one per running
 /// thread).
 pub fn codex_open_rollouts(pid: u32) -> Vec<PathBuf> {
-    let Ok(out) = crate::run::output(Command::new("/usr/sbin/lsof").args(["-p", &pid.to_string(), "-Fn"]), Duration::from_secs(3)) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<PathBuf> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.strip_prefix('n'))
-        .filter(|p| p.contains("/.codex/sessions/") && p.ends_with(".jsonl"))
-        .map(PathBuf::from)
+    let mut paths: Vec<PathBuf> = crate::platform::open_files(pid)
+        .into_iter()
+        .filter(|p| {
+            let in_sessions =
+                p.components().map(|c| c.as_os_str()).collect::<Vec<_>>().windows(2).any(|w| w[0] == ".codex" && w[1] == "sessions");
+            in_sessions && p.extension().is_some_and(|e| e == "jsonl")
+        })
         .collect();
     paths.sort();
     paths.dedup();
@@ -146,12 +143,8 @@ pub fn recent_codex(now_ms: u64) -> Vec<Recent> {
          and coalesce(thread_source, 'user') = 'user' and source not in ('cli', 'exec') and source not like '{{%' \
          order by updated desc limit 50"
     );
-    let uri = format!("file:{}?mode=ro", db.display());
-    let Ok(out) = crate::run::output(Command::new("/usr/bin/sqlite3").args(["-readonly", "-json", &uri, &sql]), Duration::from_secs(3))
-    else {
-        return Vec::new();
-    };
-    parse_codex_threads(&String::from_utf8_lossy(&out.stdout))
+    let rows = crate::sqlite::query(&db, &sql).unwrap_or_default();
+    parse_codex_threads(&serde_json::to_string(&rows).unwrap_or_default())
 }
 
 pub(crate) fn parse_codex_threads(json: &str) -> Vec<Recent> {

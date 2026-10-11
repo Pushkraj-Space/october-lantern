@@ -6,6 +6,7 @@
 //!   the agent's environment
 //! - Terminal and iTerm2: their AppleScript, finding the tab by its tty (asks the user once for
 //!   Automation permission)
+//! - Lantern's own sessions on Windows: the session's host, which runs only the agent (pty.rs)
 //!
 //! Every send first checks that the terminal still belongs to the agent Lantern saw: the same
 //! process (pid and start time), still running the same program, on the same terminal, and in
@@ -66,11 +67,15 @@ impl std::error::Error for Uncertain {}
 /// comment).
 pub fn verify(agent: &Agent) -> Result<()> {
     let Some(live) = procs::live(agent.pid) else { bail!("@{} has exited", agent.handle) };
+    if let Route::Pty { session } = &agent.route {
+        let info = crate::pty::info(session).with_context(|| format!("@{}'s session", agent.handle))?;
+        return check_session(agent, &live, &info, &procs::ancestors_of(agent.pid));
+    }
     check(agent, &live)
 }
 
-/// `verify` against a given reading of the process, so every rule can be tested.
-pub fn check(agent: &Agent, live: &Live) -> Result<()> {
+/// Same process (pid and start time), same program, same terminal.
+fn check_identity(agent: &Agent, live: &Live) -> Result<()> {
     let h = &agent.handle;
     if live.start != agent.start_time {
         bail!("@{h} has exited and another process took its place");
@@ -88,6 +93,32 @@ pub fn check(agent: &Agent, live: &Live) -> Result<()> {
     if live.tty.as_ref() != Some(tty) {
         bail!("@{h} is no longer on the terminal Lantern saw it in");
     }
+    Ok(())
+}
+
+/// A Lantern session runs only its agent: no shell is left when the agent exits, because the
+/// session ends with it. So instead of a foreground check, the agent must be the process the
+/// session started (or run under it), still running, on the session's own console.
+pub fn check_session(agent: &Agent, live: &Live, info: &crate::pty::Info, ancestors: &[u32]) -> Result<()> {
+    check_identity(agent, live)?;
+    let h = &agent.handle;
+    if !info.alive {
+        bail!("@{h}'s session has ended");
+    }
+    if info.child_tty.is_none() || info.child_tty != agent.tty {
+        bail!("@{h} isn't on its session's console");
+    }
+    if agent.pid != info.child_pid && !ancestors.contains(&info.child_pid) {
+        bail!("@{h} isn't the program its session started");
+    }
+    Ok(())
+}
+
+/// `verify` against a given reading of the process, so every rule can be tested.
+pub fn check(agent: &Agent, live: &Live) -> Result<()> {
+    check_identity(agent, live)?;
+    let h = &agent.handle;
+    let tty = agent.tty.as_deref().unwrap_or_default();
     if live.tpgid == 0 {
         bail!("Lantern can't tell what's in the foreground of @{h}'s terminal, so it won't type there");
     }
@@ -143,6 +174,7 @@ pub fn send_text(agent: &Agent, text: &str) -> Result<()> {
         Route::October { .. } => bail!("replies to October's agents go through October"),
         Route::Terminal { tty } => osascript(TERMINAL_SEND, &[tty, &line], SEND_LIMIT, true).map(|_| ()),
         Route::Iterm { tty } => osascript(ITERM_SEND, &[tty, &line, "yes"], SEND_LIMIT, true).map(|_| ()),
+        Route::Pty { session } => crate::pty::send_text(session, &line),
         Route::None => bail!("Lantern can't type into {} yet", host_name(agent)),
     }
 }
@@ -165,6 +197,8 @@ pub fn send_key(agent: &Agent, key: Key) -> Result<()> {
         }
         (Route::Iterm { tty }, Key::Escape) => osascript(ITERM_SEND, &[tty, "\u{1b}", "no"], SEND_LIMIT, true).map(|_| ()),
         (Route::Iterm { tty }, Key::Char(c)) => osascript(ITERM_SEND, &[tty, &c.to_string(), "no"], SEND_LIMIT, true).map(|_| ()),
+        (Route::Pty { session }, Key::Escape) => crate::pty::send_bytes(session, "\u{1b}"),
+        (Route::Pty { session }, Key::Char(c)) => crate::pty::send_bytes(session, &c.to_string()),
         (Route::October { .. }, _) => bail!("single keys aren't supported for October's agents yet"),
         // Terminal's `do script` always adds Enter, which could confirm the wrong thing.
         (Route::Terminal { .. }, _) => bail!("single keys aren't supported in Terminal"),
@@ -190,17 +224,38 @@ pub fn focus(agent: &Agent) -> Result<()> {
             // An agent in October Desktop that Lantern isn't paired with: open its canvas.
             let canvas = agent.host.as_ref().and_then(|h| h.canvas.as_deref()).unwrap_or_default();
             let url = format!("october://canvas/{canvas}");
-            let out = output_within(Command::new("/usr/bin/open").arg(&url), SEND_LIMIT, false)?;
-            if !out.status.success() {
-                bail!("October didn't open the canvas");
-            }
-            Ok(())
+            crate::platform::open_url(&url, SEND_LIMIT).context("October didn't open the canvas")
         }
         Route::Cmux { workspace, .. } => cmux(&["select-workspace", "--workspace", workspace]),
         Route::Terminal { tty } => osascript(TERMINAL_FOCUS, &[tty], SEND_LIMIT, false).map(|_| ()),
         Route::Iterm { tty } => osascript(ITERM_FOCUS, &[tty], SEND_LIMIT, false).map(|_| ()),
+        Route::Pty { session } => focus_session(session),
+        // Windows: the terminal's window, not the exact tab.
+        #[cfg(windows)]
+        Route::None if agent.host.is_some() => crate::platform::focus_window(agent.host.as_ref().map_or(0, |h| h.pid)),
         Route::None => Ok(()),
     }
+}
+
+/// The window showing a Lantern session, or a new one when none does.
+#[cfg(windows)]
+fn focus_session(session: &str) -> Result<()> {
+    let clients: Vec<u32> = crate::pty::clients(session)?.into_iter().filter(|pid| crate::platform::alive(*pid)).collect();
+    if !clients.is_empty() {
+        let mut sys = sysinfo::System::new();
+        let table = procs::ProcTable::capture(&mut sys, &mut procs::ProcCache::default());
+        if let Some(host) = clients.iter().find_map(|pid| crate::scanner::host_app(&table, *pid))
+            && crate::platform::focus_window(host.pid).is_ok()
+        {
+            return Ok(());
+        }
+    }
+    crate::pty::open_window(session)
+}
+
+#[cfg(not(windows))]
+fn focus_session(_session: &str) -> Result<()> {
+    bail!("Lantern's own sessions are Windows-only")
 }
 
 fn pane(agent: &Agent) -> Result<&TmuxPane> {

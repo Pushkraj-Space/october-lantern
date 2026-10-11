@@ -16,6 +16,18 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+#[cfg(windows)]
+#[test]
+fn classifies_windows_command_lines() {
+    let claude = r"C:\Users\x\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js";
+    assert_eq!(scanner::classify(&proc(&[r"C:\Program Files\nodejs\node.exe", claude])), Some(Kind::Claude));
+    assert_eq!(scanner::classify(&proc(&[r"C:\Users\x\.local\bin\claude.exe"])), Some(Kind::Claude));
+    assert_eq!(scanner::classify(&proc(&[r"C:\Users\x\.local\bin\CLAUDE.EXE", "-p", "hi"])), None);
+    let codex = r"C:\Users\x\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js";
+    assert_eq!(scanner::classify(&proc(&["node.exe", codex, "resume"])), Some(Kind::Codex));
+    assert_eq!(scanner::classify(&proc(&["node.exe", r"C:\work\cli.js"])), None);
+}
+
 fn proc(cmd: &[&str]) -> Proc {
     Proc {
         pid: 1000,
@@ -128,7 +140,7 @@ fn codex_code_mode_tool_calls() {
 #[test]
 fn hooks_install_uninstall_and_missing_app() {
     let home = temp_dir("home");
-    unsafe { std::env::set_var("HOME", &home) };
+    unsafe { std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &home) };
     fs::create_dir_all(home.join(".claude")).unwrap();
     fs::create_dir_all(home.join(".codex")).unwrap();
     let theirs = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]},"model":"opus"}"#;
@@ -149,7 +161,7 @@ fn hooks_install_uninstall_and_missing_app() {
     assert!(settings.contains("PermissionRequest"));
     let config = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
     assert!(config.contains("lantern-engine") && config.contains("[tui]"));
-    assert!(hooks::support_dir().join("bin/lantern-engine").exists());
+    assert!(hooks::support_dir().join("bin").join(format!("lantern-engine{}", std::env::consts::EXE_SUFFIX)).exists());
 
     // Installing twice doesn't duplicate anything, and the second backup doesn't overwrite the first.
     hooks::install().unwrap();
@@ -161,12 +173,15 @@ fn hooks_install_uninstall_and_missing_app() {
     assert_eq!(backups, 2);
 
     // If Lantern is gone, the hook command still exits 0 and prints nothing.
-    let gone = home.join("nowhere/lantern-engine");
-    let out = Command::new("/bin/sh").args(["-c", &hooks::claude_hook_command(&gone)]).output().unwrap();
-    assert!(out.status.success() && out.stdout.is_empty());
-    let codex = hooks::codex_notify_command(&gone);
-    let out = Command::new(&codex[0]).args(&codex[1..]).arg("{\"type\":\"agent-turn-complete\"}").output().unwrap();
-    assert!(out.status.success());
+    #[cfg(unix)]
+    {
+        let gone = home.join("nowhere/lantern-engine");
+        let out = Command::new("/bin/sh").args(["-c", &hooks::claude_hook_command(&gone)]).output().unwrap();
+        assert!(out.status.success() && out.stdout.is_empty());
+        let codex = hooks::codex_notify_command(&gone);
+        let out = Command::new(&codex[0]).args(&codex[1..]).arg("{\"type\":\"agent-turn-complete\"}").output().unwrap();
+        assert!(out.status.success());
+    }
 
     hooks::uninstall_everything().unwrap();
     let settings: serde_json::Value = serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap()).unwrap();
@@ -277,6 +292,7 @@ pub(crate) fn agent_for(pid: u32, start_time: u64, tty: Option<&str>) -> Agent {
 
 /// Typing goes to a process, not a terminal: an agent that exited (or a reused pid, or a
 /// different terminal) is refused before anything is sent.
+#[cfg(unix)]
 #[test]
 fn delivery_refuses_targets_that_are_not_the_agent_any_more() {
     // A child that exits at once, so its pid is gone (or reused by something with another start).
@@ -331,8 +347,37 @@ fn delivery_refuses_unknown_owners_and_changed_endpoints() {
     assert!(deliver::check(&moved, &live_like(&moved)).unwrap_err().to_string().contains("tab changed"));
 }
 
+/// A Lantern session (Windows) has no foreground to check; the agent must be the session's own
+/// process, alive, on the session's console.
+#[test]
+fn session_delivery_requires_the_sessions_own_agent() {
+    use crate::pty::Info;
+    let mut a = agent_for(40, 10, Some("con:900"));
+    a.exe = Some(r"C:\Program Files\nodejs\node.exe".into());
+    a.comm = "node.exe".into();
+    a.route = Route::Pty { session: "claude-app-1".into() };
+    // On Windows the foreground is never known; that must not matter here.
+    let live = crate::procs::Live { tpgid: 0, pgid: 0, ..live_like(&a) };
+    let info = Info { child_pid: 40, child_start: 10, child_tty: Some("con:900".into()), alive: true };
+    assert!(deliver::check_session(&a, &live, &info, &[]).is_ok());
+    // Started through a wrapper the session ran: still the session's agent.
+    let wrapper = Info { child_pid: 39, ..info.clone() };
+    assert!(deliver::check_session(&a, &live, &wrapper, &[39, 4]).is_ok());
+    assert!(deliver::check_session(&a, &live, &wrapper, &[4]).unwrap_err().to_string().contains("isn't the program"));
+    let ended = Info { alive: false, ..info.clone() };
+    assert!(deliver::check_session(&a, &live, &ended, &[]).unwrap_err().to_string().contains("ended"));
+    let other_console = Info { child_tty: Some("con:901".into()), ..info.clone() };
+    assert!(deliver::check_session(&a, &live, &other_console, &[]).unwrap_err().to_string().contains("console"));
+    let reused = crate::procs::Live { start: 11, ..live_like(&a) };
+    assert!(deliver::check_session(&a, &reused, &info, &[]).unwrap_err().to_string().contains("another process"));
+    // The ordinary terminal check still refuses an unknown foreground.
+    a.route = Route::None;
+    assert!(deliver::check(&a, &live).is_err());
+}
+
 /// The process audit's counterexample: same pid, same start time, same terminal, but the agent
 /// `exec`ed a shell. The kernel reports the new program, and delivery refuses.
+#[cfg(unix)]
 #[test]
 fn delivery_refuses_a_process_that_execed_something_else() {
     let mut child = Command::new("/bin/sh").args(["-c", "/bin/sleep 0.4; exec /bin/sleep 5"]).spawn().unwrap();
@@ -516,6 +561,7 @@ fn every_permission_request_gets_its_own_prompt_id() {
     assert!(second.question_detail.unwrap().contains("rm -rf ~"));
 }
 
+#[cfg(unix)]
 #[test]
 fn helpers_are_bounded_and_drained() {
     use std::time::{Duration, Instant};
@@ -533,6 +579,27 @@ fn helpers_are_bounded_and_drained() {
         crate::run::output(Command::new("/bin/sh").args(["-c", "echo hi; /bin/sleep 5 & exit 0"]), Duration::from_millis(100)).unwrap();
     assert!(t.elapsed() < Duration::from_millis(600), "{:?}", t.elapsed());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
+}
+
+/// The same limits on Windows, where the helper and what it starts share a job object.
+#[cfg(windows)]
+#[test]
+fn helpers_are_bounded_and_drained() {
+    use std::time::{Duration, Instant};
+    let out = crate::run::output(Command::new("cmd").args(["/d", "/c", "echo hi"]), Duration::from_secs(10)).unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
+    // Too slow: killed at the limit.
+    let t = Instant::now();
+    let e = crate::run::output(Command::new("ping").args(["-n", "6", "127.0.0.1"]), Duration::from_millis(200)).unwrap_err();
+    assert!(e.downcast_ref::<crate::run::TimedOut>().is_some());
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    // Exits at once, but leaves a child holding its output open: still ends at the limit.
+    let t = Instant::now();
+    let out =
+        crate::run::output(Command::new("cmd").args(["/d", "/c", "start /b ping -n 6 127.0.0.1 & echo hi"]), Duration::from_millis(500))
+            .unwrap();
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("hi"));
 }
 
 /// A screenshot reaches each agent in a way it can use: attached (Codex), or readable without a
