@@ -330,6 +330,9 @@ pub fn render_settings(ui: &mut egui::Ui, cx: &mut Ctx) -> f32 {
 }
 
 #[cfg(test)]
+mod interaction_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{Agent, AgentState, Chat, ChatMessage, EngineHealth, LaunchPreview, Role, Route};

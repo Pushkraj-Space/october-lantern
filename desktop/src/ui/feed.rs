@@ -116,23 +116,29 @@ fn header(ui: &mut Ui, cx: &mut Ctx) {
 
 fn tab(ui: &mut Ui, cx: &mut Ctx, title: &str, count: usize, selected: bool, panel: PanelMode) {
     let response = ui
-        .horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            tracking_label(ui, title, 11.0, if selected { t::INK } else { t::MUTED });
-            if count > 0 {
-                let waiting = selected && panel == PanelMode::Inbox;
-                let color = if waiting { t::AMBER } else { t::MUTED };
-                let galley = ui.painter().layout_no_wrap(count.to_string(), t::font(10.0, Weight::Rounded), color);
-                let (rect, _) = ui.allocate_exact_size(galley.size() + egui::vec2(12.0, 2.0), Sense::hover());
-                ui.painter().rect_filled(rect, rect.height() / 2.0, if waiting { t::opacity(t::AMBER, 0.25) } else { t::FAINT });
-                ui.painter().galley(rect.min + egui::vec2(6.0, 1.0), galley, color);
-            }
+        .scope_builder(egui::UiBuilder::new().id_salt(("feed-tab", title)).sense(Sense::click()), |ui| {
+            // Swift's TabLabel is one plain Button, not independently selectable text.
+            ui.style_mut().interaction.selectable_labels = false;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                tracking_label(ui, title, 11.0, if selected { t::INK } else { t::MUTED });
+                if count > 0 {
+                    let waiting = selected && panel == PanelMode::Inbox;
+                    let color = if waiting { t::AMBER } else { t::MUTED };
+                    let galley = ui.painter().layout_no_wrap(count.to_string(), t::font(10.0, Weight::Rounded), color);
+                    let (rect, _) = ui.allocate_exact_size(galley.size() + egui::vec2(12.0, 2.0), Sense::hover());
+                    ui.painter().rect_filled(rect, rect.height() / 2.0, if waiting { t::opacity(t::AMBER, 0.25) } else { t::FAINT });
+                    ui.painter().galley(rect.min + egui::vec2(6.0, 1.0), galley, color);
+                }
+            });
         })
-        .response
-        .interact(Sense::click());
+        .response;
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, format!("{title}, {count}"))
     });
+    if response.has_focus() {
+        ui.painter().rect_stroke(response.rect.expand(2.0), 3.0, Stroke::new(1.0, t::AMBER), egui::StrokeKind::Outside);
+    }
     if response.clicked() {
         cx.emit(UiAction::SetPanel(Some(panel)));
     }
@@ -364,6 +370,8 @@ fn row(ui: &mut Ui, cx: &mut Ctx, agent: &Agent) {
     let response = egui::Frame::new()
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
+            // AgentRow is also a plain Button on the Mac. Keep selection in chat, not here.
+            ui.style_mut().interaction.selectable_labels = false;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 c::agent_badge(ui, cx.assets, agent, 26.0);
