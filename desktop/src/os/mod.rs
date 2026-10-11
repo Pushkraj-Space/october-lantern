@@ -124,6 +124,48 @@ pub fn event_pump(wake: impl Fn(bool) + Send + 'static) -> (Sender<Event>, mpsc:
     });
     (tx, events)
 }
+/// A global shortcut from Lantern's preferences ("ctrl+alt+space"): its modifiers and its key,
+/// `' '` for Space or an uppercase letter or digit. `None` for "none" or anything unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hotkey {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub key: char,
+}
+
+impl Hotkey {
+    pub fn parse(keys: &str) -> Option<Self> {
+        let mut hotkey = Hotkey { ctrl: false, alt: false, shift: false, key: '\0' };
+        for part in keys.split('+') {
+            match part.to_ascii_lowercase().as_str() {
+                "ctrl" => hotkey.ctrl = true,
+                "alt" => hotkey.alt = true,
+                "shift" => hotkey.shift = true,
+                "space" => hotkey.key = ' ',
+                key if key.len() == 1 && key.chars().all(|c| c.is_ascii_alphanumeric()) => {
+                    hotkey.key = key.chars().next()?.to_ascii_uppercase();
+                }
+                _ => return None,
+            }
+        }
+        (hotkey.key != '\0' && (hotkey.ctrl || hotkey.alt)).then_some(hotkey)
+    }
+
+    /// The XDG GlobalShortcuts trigger ("CTRL+ALT+space").
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn trigger(self) -> String {
+        let mut parts = Vec::new();
+        for (on, name) in [(self.ctrl, "CTRL"), (self.alt, "ALT"), (self.shift, "SHIFT")] {
+            if on {
+                parts.push(name.to_string());
+            }
+        }
+        parts.push(if self.key == ' ' { "space".into() } else { self.key.to_ascii_lowercase().to_string() });
+        parts.join("+")
+    }
+}
+
 pub fn task<T: Send + 'static>(
     tx: Sender<Event>,
     work: impl FnOnce() -> Result<T> + Send + 'static,
@@ -164,6 +206,20 @@ pub fn hooks(action: &'static str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn every_offered_shortcut_parses_and_none_unbinds() {
+        for keys in crate::model::MESSAGE_HOTKEYS.iter().chain(&crate::model::POINT_ASK_HOTKEYS) {
+            assert_eq!(super::Hotkey::parse(keys).is_none(), *keys == "none", "{keys}");
+        }
+        let hotkey = super::Hotkey::parse("ctrl+shift+space").unwrap();
+        assert_eq!((hotkey.ctrl, hotkey.alt, hotkey.shift, hotkey.key), (true, false, true, ' '));
+        assert_eq!(hotkey.trigger(), "CTRL+SHIFT+space");
+        assert_eq!(super::Hotkey::parse("ctrl+alt+k").unwrap().trigger(), "CTRL+ALT+k");
+        // A bare key or an unknown name never becomes a global shortcut.
+        assert_eq!(super::Hotkey::parse("space"), None);
+        assert_eq!(super::Hotkey::parse("ctrl+alt+f13"), None);
+    }
+
     #[test]
     fn tray_activation_wakes_the_window_without_ui_polling() {
         let (wake_tx, wake_rx) = mpsc::channel();

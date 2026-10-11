@@ -402,7 +402,20 @@ fn load_state() -> (Prefs, Turns) {
         return (carried_over(&crate::settings::Settings::load().unwrap_or_default()), Turns::default());
     };
     let value: Value = serde_json::from_str(&text).unwrap_or_default();
-    (serde_json::from_value(value["prefs"].clone()).unwrap_or_default(), serde_json::from_value(value["turns"].clone()).unwrap_or_default())
+    let prefs = offered_shortcuts(serde_json::from_value(value["prefs"].clone()).unwrap_or_default());
+    (prefs, serde_json::from_value(value["turns"].clone()).unwrap_or_default())
+}
+
+/// A saved shortcut Settings doesn't offer (an edited file) goes back to the Mac's default.
+fn offered_shortcuts(mut prefs: Prefs) -> Prefs {
+    let defaults = Prefs::default();
+    if !crate::model::MESSAGE_HOTKEYS.contains(&prefs.message_hotkey.as_str()) {
+        prefs.message_hotkey = defaults.message_hotkey;
+    }
+    if !crate::model::POINT_ASK_HOTKEYS.contains(&prefs.point_ask_hotkey.as_str()) {
+        prefs.point_ask_hotkey = defaults.point_ask_hotkey;
+    }
+    prefs
 }
 
 /// A first run after the earlier window: keep the choices people made there.
@@ -431,5 +444,8 @@ mod carry_over_tests {
         assert!(!prefs.notifications && prefs.notify_finished && !prefs.toolkit_in_sessions && prefs.bus_for_sessions);
         assert!(prefs.automatic_updates && prefs.welcomed);
         assert_eq!(prefs.pill_top, 0.72, "everything else starts as on the Mac");
+        let edited = crate::model::Prefs { message_hotkey: "alt+space".into(), point_ask_hotkey: "none".into(), ..Default::default() };
+        let offered = super::offered_shortcuts(edited);
+        assert_eq!((offered.message_hotkey.as_str(), offered.point_ask_hotkey.as_str()), ("ctrl+alt+space", "none"));
     }
 }

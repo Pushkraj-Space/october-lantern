@@ -17,9 +17,7 @@ impl Lantern {
         crate::os::tray(self.tx.clone());
         crate::os::bridge(self.tx.clone(), snapshot.clone());
         self.engine.observe(self.tx.clone(), snapshot, self.model.prefs.notifications, self.model.prefs.notify_finished);
-        if self.model.prefs.message_hotkey != "none" || self.model.prefs.point_ask_hotkey != "none" {
-            crate::os::shortcuts(self.tx.clone());
-        }
+        crate::os::shortcuts(self.tx.clone(), self.model.prefs.message_hotkey.clone(), self.model.prefs.point_ask_hotkey.clone());
         self.publish_tray_menu();
     }
 

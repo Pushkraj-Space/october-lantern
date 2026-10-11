@@ -631,8 +631,18 @@ pub fn offered_folders(prefs: &Prefs, agents: &[Agent], home: &str) -> Vec<Strin
         .collect()
 }
 
+/// Shortcuts Settings offers to message an agent (Swift `HotKeyPreset`): ⌃⌥Space, ⇧⌘Space and ⌃⌥L
+/// as Ctrl+Alt+Space, Ctrl+Shift+Space and Ctrl+Alt+L. The Mac's ⌥Space is left out: Alt+Space
+/// opens the window menu on GNOME and Windows (CONTRACT §8).
+pub const MESSAGE_HOTKEYS: [&str; 4] = ["ctrl+alt+space", "ctrl+shift+space", "ctrl+alt+l", "none"];
+/// Point & Ask shortcuts (Swift `PointAskPreset`: ⌃⌥P, ⌃⌥K, None).
+pub const POINT_ASK_HOTKEYS: [&str; 3] = ["ctrl+alt+p", "ctrl+alt+k", "none"];
+
 /// "ctrl+alt+space" → "Ctrl+Alt+Space" (menus, Welcome and Settings show shortcuts this way).
 pub fn hotkey_label(keys: &str) -> String {
+    if keys == "none" {
+        return "None".into();
+    }
     keys.split('+')
         .map(|part| {
             let mut chars = part.chars();

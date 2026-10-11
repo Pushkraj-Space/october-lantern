@@ -158,8 +158,42 @@ pub fn folder() -> Result<PathBuf> {
     let uris = Vec::<String>::try_from(result.remove("uris").context("folder URI missing")?)?;
     url::Url::parse(uris.first().context("no folder selected")?)?.to_file_path().map_err(|_| anyhow::anyhow!("Choose a local folder"))
 }
-pub fn shortcuts(tx: Sender<Event>) {
+/// The GlobalShortcuts session that holds Lantern's shortcuts now, closed when they change.
+static SHORTCUT_SESSION: std::sync::Mutex<Option<(Connection, OwnedObjectPath)>> = std::sync::Mutex::new(None);
+static SHORTCUT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn close_shortcut_session() {
+    if let Some((connection, session)) = SHORTCUT_SESSION.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        // Best effort: a session the portal already dropped has nothing left to unbind.
+        let _ = Proxy::new(&connection, "org.freedesktop.portal.Desktop", session, "org.freedesktop.portal.Session")
+            .and_then(|session| session.call::<_, _, ()>("Close", &()));
+    }
+}
+
+/// Binds the two shortcuts from the preferences through the GlobalShortcuts portal, replacing
+/// the ones bound before. The keys are part of each shortcut's id, so the desktop treats a
+/// changed choice as a new shortcut and offers its trigger again; activations report the
+/// plain id ("compose", "capture").
+pub fn shortcuts(tx: Sender<Event>, message: String, point_ask: String) {
+    use std::sync::atomic::Ordering;
+    let generation = SHORTCUT_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
+        close_shortcut_session();
+        let bindings: Vec<(String, Options)> =
+            [("compose", &message, "Lantern: Message an agent"), ("capture", &point_ask, "Lantern: Point & Ask")]
+                .into_iter()
+                .filter_map(|(id, keys, description)| {
+                    let hotkey = super::Hotkey::parse(keys)?;
+                    Some((
+                        format!("{id}:{keys}"),
+                        Options::from([("description".into(), text(description)), ("preferred_trigger".into(), text(&hotkey.trigger()))]),
+                    ))
+                })
+                .collect();
+        if bindings.is_empty() {
+            let _ = tx.send(Event::Shortcuts(false));
+            return;
+        }
         let result = (|| -> Result<()> {
             let connection = connection()?;
             let proxy = portal(&connection, "org.freedesktop.portal.GlobalShortcuts")?;
@@ -169,28 +203,25 @@ pub fn shortcuts(tx: Sender<Event>) {
             let mut result = request(&connection, &id, || Ok(proxy.call("CreateSession", &(options,))?))?;
             let session =
                 OwnedObjectPath::try_from(String::try_from(result.remove("session_handle").context("missing shortcut session")?)?)?;
+            *SHORTCUT_SESSION.lock().unwrap_or_else(|e| e.into_inner()) = Some((connection.clone(), session.clone()));
+            // A newer change started meanwhile: it owns the shortcuts.
+            if SHORTCUT_GENERATION.load(Ordering::SeqCst) != generation {
+                close_shortcut_session();
+                return Ok(());
+            }
             let id = token();
-            let bindings = vec![
-                (
-                    "compose",
-                    Options::from([
-                        ("description".into(), text("Lantern: Message an agent")),
-                        ("preferred_trigger".into(), text("CTRL+ALT+space")),
-                    ]),
-                ),
-                (
-                    "capture",
-                    Options::from([("description".into(), text("Lantern: Point & Ask")), ("preferred_trigger".into(), text("CTRL+ALT+p"))]),
-                ),
-            ];
             let mut activated = proxy.receive_signal("Activated")?;
             request(&connection, &id, || {
                 Ok(proxy.call("BindShortcuts", &(&session, bindings, "", Options::from([("handle_token".into(), text(&id))])))?)
             })?;
             let _ = tx.send(Event::Shortcuts(true));
             for message in &mut activated {
+                if SHORTCUT_GENERATION.load(Ordering::SeqCst) != generation {
+                    break;
+                }
                 let (handle, shortcut, _, _): (OwnedObjectPath, String, u64, Options) = message.body().deserialize()?;
-                if handle == session && tx.send(Event::Activate(shortcut)).is_err() {
+                let id = shortcut.split(':').next().unwrap_or_default().to_string();
+                if handle == session && tx.send(Event::Activate(id)).is_err() {
                     break;
                 }
             }

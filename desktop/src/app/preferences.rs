@@ -31,14 +31,16 @@ impl Lantern {
                 prefs.open_at_login = on;
             }
             SettingChange::Edge(edge) => prefs.edge = edge,
-            SettingChange::MessageHotkey(keys) => {
+            // Only the offered shortcuts (Swift's presets); each change rebinds both.
+            SettingChange::MessageHotkey(keys) if crate::model::MESSAGE_HOTKEYS.contains(&keys.as_str()) => {
                 prefs.message_hotkey = keys;
-                crate::os::shortcuts(self.tx.clone());
+                crate::os::shortcuts(self.tx.clone(), prefs.message_hotkey.clone(), prefs.point_ask_hotkey.clone());
             }
-            SettingChange::PointAskHotkey(keys) => {
+            SettingChange::PointAskHotkey(keys) if crate::model::POINT_ASK_HOTKEYS.contains(&keys.as_str()) => {
                 prefs.point_ask_hotkey = keys;
-                crate::os::shortcuts(self.tx.clone());
+                crate::os::shortcuts(self.tx.clone(), prefs.message_hotkey.clone(), prefs.point_ask_hotkey.clone());
             }
+            SettingChange::MessageHotkey(_) | SettingChange::PointAskHotkey(_) => return,
             SettingChange::AutomaticUpdates(on) => prefs.automatic_updates = on,
             SettingChange::ScreenshotNewSessions(on) => prefs.screenshot_new_sessions = on,
             SettingChange::BusForSessions(on) => prefs.bus_for_sessions = on,

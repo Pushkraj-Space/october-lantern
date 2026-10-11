@@ -30,7 +30,7 @@ use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
 use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, RegisterHotKey};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey};
 use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONTIMEOUT, NIN_BALLOONUSERCLICK,
     NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW, ShellExecuteW,
@@ -297,7 +297,7 @@ pub fn secret_clear() {
 
 enum ShellCommand {
     Tray,
-    Shortcuts,
+    Shortcuts { message: String, point_ask: String },
     Notify { agent: String, title: String, body: String },
 }
 
@@ -310,8 +310,8 @@ struct Shell {
 /// Messages the hidden window gets: commands waiting, and tray icon events.
 const WM_SHELL_COMMAND: u32 = WM_APP + 1;
 const WM_TRAY: u32 = WM_APP + 2;
-/// The Mac's default shortcuts: Ctrl+Alt+Space messages an agent (Ask Lantern), Ctrl+Alt+P is
-/// Point & Ask.
+/// The two global shortcuts: messaging an agent (Ask Lantern) and Point & Ask, as the preferences
+/// choose them (the Mac's defaults are Ctrl+Alt+Space and Ctrl+Alt+P).
 const HOTKEY_COMPOSE: i32 = 1;
 const HOTKEY_CAPTURE: i32 = 2;
 
@@ -430,16 +430,26 @@ fn run_command(hwnd: HWND, state: &mut ShellState, command: ShellCommand) {
             state.tray = add_tray(hwnd, state);
             let _ = state.tx.send(Event::Tray(state.tray));
         }
-        ShellCommand::Shortcuts => {
-            let modifiers = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
-            let compose = unsafe { RegisterHotKey(hwnd, HOTKEY_COMPOSE, modifiers, u32::from(b' ')) } != 0;
-            let capture = unsafe { RegisterHotKey(hwnd, HOTKEY_CAPTURE, modifiers, u32::from(b'P')) } != 0;
-            let _ = state.tx.send(Event::Shortcuts(compose || capture));
-            for (ok, keys) in [(compose, "Ctrl+Alt+Space"), (capture, "Ctrl+Alt+P")] {
-                if !ok {
-                    let _ = state.tx.send(Event::Status(format!("Shortcuts: {keys} is taken by another app")));
+        ShellCommand::Shortcuts { message, point_ask } => {
+            let mut bound = false;
+            for (id, keys) in [(HOTKEY_COMPOSE, &message), (HOTKEY_CAPTURE, &point_ask)] {
+                unsafe { UnregisterHotKey(hwnd, id) };
+                let Some(hotkey) = super::Hotkey::parse(keys) else { continue };
+                let mut modifiers = MOD_NOREPEAT;
+                for (on, flag) in [(hotkey.ctrl, MOD_CONTROL), (hotkey.alt, MOD_ALT), (hotkey.shift, MOD_SHIFT)] {
+                    if on {
+                        modifiers |= flag;
+                    }
+                }
+                // Virtual-key codes for Space, A–Z and 0–9 are their ASCII codes.
+                if unsafe { RegisterHotKey(hwnd, id, modifiers, hotkey.key as u32) } != 0 {
+                    bound = true;
+                } else {
+                    let label = crate::model::hotkey_label(keys);
+                    let _ = state.tx.send(Event::Status(format!("Shortcuts: {label} is taken by another app")));
                 }
             }
+            let _ = state.tx.send(Event::Shortcuts(bound));
         }
         ShellCommand::Notify { agent, title, body } => {
             // Notifications come from the tray icon; it has to be there.
@@ -538,8 +548,8 @@ pub fn tray(tx: Sender<Event>) {
     send(&tx, ShellCommand::Tray);
 }
 
-pub fn shortcuts(tx: Sender<Event>) {
-    send(&tx, ShellCommand::Shortcuts);
+pub fn shortcuts(tx: Sender<Event>, message: String, point_ask: String) {
+    send(&tx, ShellCommand::Shortcuts { message, point_ask });
 }
 
 /// Whether Windows shows notifications at all (Settings › System › Notifications); it is off
