@@ -1,8 +1,6 @@
 //! The pill and the panel beside it (Swift `Windows.swift`), adapted per CONTRACT §6.
 //! Geometry is in logical points, origin top-left, y down; the Mac's AppKit maths is y up, so
 //! "top fraction measured from the bottom" is converted here once.
-// The new UI path is built while the legacy UI is still the default (CONTRACT §10).
-#![allow(dead_code)]
 
 pub mod pill;
 
@@ -22,8 +20,6 @@ pub const PILL_EXPANDED: Vec2 = vec2(50.0, 213.0);
 pub const COLLAPSE_AFTER: f64 = 0.7;
 /// After Welcome, the pill stays expanded this long so people can find it.
 pub const FLASH_FOR: f64 = 3.0;
-/// Drags shorter than this are clicks.
-pub const DRAG_THRESHOLD: f32 = 4.0;
 
 /// The tallest a panel may be in this work area.
 pub fn panel_limit(work: Rect) -> f32 {

@@ -71,10 +71,11 @@ impl Lantern {
             "historyResult" => self.history_result(&event),
             "replyResult" => self.reply_result(&event),
             "attachResult" => {
-                if let Some(Pending::Focus { .. }) = text(&event, "requestId").and_then(|id| self.pending.remove(&id))
+                if let Some(Pending::Focus { agent_id }) = text(&event, "requestId").and_then(|id| self.pending.remove(&id))
                     && event["ok"] != true
                 {
-                    self.show(text(&event, "message").unwrap_or_else(|| "Couldn't open that terminal".into()));
+                    let handle = self.model.agent(&agent_id).map_or("agent".to_string(), |agent| agent.handle.clone());
+                    self.show(format!("Couldn't open @{handle}: {}", text(&event, "message").unwrap_or_else(|| "unknown error".into())));
                 }
             }
             "october" => self.model.october = serde_json::from_value::<OctoberLink>(event["october"].clone()).ok(),
@@ -113,7 +114,7 @@ impl Lantern {
             self.pending.remove(&old);
         }
         if let Some(id) = self.request(json!({"type": "history", "agentId": agent_id})) {
-            self.pending.insert(id.clone(), Pending::History { agent_id });
+            self.pending.insert(id.clone(), Pending::History);
             self.history_request = Some(id);
         }
     }

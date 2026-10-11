@@ -15,6 +15,9 @@ pub(super) struct Upkeep {
     checked: Option<Instant>,
     /// Open the toolkit list once the engine has (re)built it.
     open_toolkit: bool,
+    /// The newest published release, once checked.
+    release: Option<crate::updates::Release>,
+    installing: bool,
 }
 
 impl Lantern {
@@ -89,7 +92,12 @@ impl Lantern {
         }
     }
 
+    /// Check for Updates: finds a newer release; once one is known, choosing it again installs it
+    /// and restarts (the Mac's "Install Update" step).
     pub(super) fn check_updates(&mut self) {
+        if let Some(release) = self.upkeep.release.clone().filter(crate::updates::Release::is_newer) {
+            return self.install_update(release);
+        }
         self.upkeep.checked = Some(Instant::now());
         self.model.system.checking_updates = true;
         crate::os::task(self.tx.clone(), crate::updates::check, Event::Update);
@@ -99,11 +107,40 @@ impl Lantern {
         self.model.system.checking_updates = false;
         match result {
             Ok(release) => {
-                self.model.system.update = Some(UpdateInfo { newer: release.is_newer(), version: release.version.to_string() });
+                let newer = release.is_newer();
+                self.model.system.update = Some(UpdateInfo { newer, version: release.version.to_string() });
+                if newer {
+                    self.show(format!("Lantern {} is available. Choose Check for Updates again to install it.", release.version));
+                }
+                self.upkeep.release = Some(release);
                 self.publish_tray_menu();
             }
-            Err(error) => self.show(error),
+            Err(error) => {
+                self.upkeep.installing = false;
+                self.show(error);
+            }
         }
+    }
+
+    /// Downloads and checks the release, installs it beside this one, and restarts into it.
+    fn install_update(&mut self, release: crate::updates::Release) {
+        if std::mem::replace(&mut self.upkeep.installing, true) {
+            return;
+        }
+        self.show(format!("Installing Lantern {}…", release.version));
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let restarted = crate::updates::install(release).and_then(|path| {
+                Ok(std::process::Command::new(path)
+                    .env_remove("LANTERN_ENGINE")
+                    .args(["--restart-after", &std::process::id().to_string()])
+                    .spawn()?)
+            });
+            let _ = tx.send(match restarted {
+                Ok(_) => Event::Quit,
+                Err(error) => Event::Update(Err(format!("Update failed: {error:#}"))),
+            });
+        });
     }
 
     /// Daily, when automatic updates are on (the first check soon after start).

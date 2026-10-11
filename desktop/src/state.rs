@@ -1,23 +1,6 @@
+//! Which agents deserve a notification: turns that start waiting on you (or finish, if asked).
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-#[derive(Clone, Default, PartialEq)]
-pub struct Draft {
-    pub text: String,
-    pub screenshot: Option<PathBuf>,
-}
-pub struct PendingReply {
-    pub request: String,
-    pub agent: String,
-    pub draft: Option<Draft>,
-}
-pub fn clear_delivered(drafts: &mut HashMap<String, Draft>, pending: &PendingReply) {
-    if let Some(sent) = &pending.draft
-        && drafts.get(&pending.agent) == Some(sent)
-    {
-        drafts.remove(&pending.agent);
-    }
-}
 #[derive(Default)]
 pub struct Notices {
     previous: HashMap<String, (String, String)>,
@@ -51,20 +34,6 @@ impl Notices {
 mod tests {
     use super::*;
     use serde_json::json;
-    #[test]
-    fn late_delivery_preserves_newer_text_and_other_sessions() {
-        let sent = Draft { text: "original".into(), ..Default::default() };
-        let mut drafts = HashMap::from([("a".into(), sent.clone()), ("b".into(), Draft { text: "other".into(), ..Default::default() })]);
-        let pending = PendingReply { request: "1".into(), agent: "a".into(), draft: Some(sent) };
-        drafts.get_mut("a").unwrap().text = "edited".into();
-        clear_delivered(&mut drafts, &pending);
-        assert_eq!(drafts["a"].text, "edited");
-        assert_eq!(drafts["b"].text, "other");
-        drafts.get_mut("a").unwrap().text = "original".into();
-        clear_delivered(&mut drafts, &pending);
-        assert!(!drafts.contains_key("a"));
-        assert!(drafts.contains_key("b"));
-    }
     #[test]
     fn notifications_skip_startup_and_repeat_snapshots() {
         let mut notices = Notices::default();

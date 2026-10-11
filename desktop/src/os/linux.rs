@@ -58,28 +58,6 @@ pub fn show_existing(action: &str) -> bool {
 }
 /// Window focus isn't passed between apps on Linux; nothing to allow.
 pub fn allow_focus(_pid: u32) {}
-pub fn raise_window() {
-    std::thread::spawn(|| {
-        let _ = (|| -> Result<()> {
-            let connection = Connection::session()?;
-            let proxy = Proxy::new(&connection, "dev.october.Lantern.Shell", "/dev/october/Lantern/Shell", "dev.october.Lantern.Shell")?;
-            Ok(proxy.call("Raise", &())?)
-        })();
-    });
-}
-pub fn edge_install() -> Result<String> {
-    let archive = std::env::current_exe()?.with_file_name("lantern-gnome-extension.zip");
-    anyhow::ensure!(archive.is_file(), "Rebuild the Linux bundle to include the GNOME extension");
-    let output = Command::new("gnome-extensions").args(["install", "--force"]).arg(archive).output()?;
-    anyhow::ensure!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let output = Command::new("gnome-extensions").args(["enable", "lantern@october.dev"]).output()?;
-    Ok(if output.status.success() {
-        "GNOME edge lantern enabled"
-    } else {
-        "Edge lantern installed. Log out and back in, then enable October Lantern in Extensions."
-    }
-    .into())
-}
 pub fn open(path: impl AsRef<std::ffi::OsStr>) -> Result<()> {
     let mut child = Command::new("xdg-open").arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
     std::thread::spawn(move || {
@@ -133,22 +111,16 @@ fn request(connection: &Connection, token: &str, call: impl FnOnce() -> Result<O
         }
     }
 }
-pub fn screenshot() -> Result<PathBuf> {
-    portal_screenshot(true)
-}
 /// The whole screen, without the desktop's chooser (the portal asks once to allow it), for New
 /// Session's "Include a screenshot of my screen" and Point & Ask's frozen frame.
 pub fn capture_screen() -> Result<PathBuf> {
-    portal_screenshot(false)
-}
-fn portal_screenshot(interactive: bool) -> Result<PathBuf> {
     // GNOME 50 denies a non-interactive capture to a host app registered under an app ID
     // (response 2, no dialog), but asks the person once for an unregistered one. So captures
     // without the chooser go out unregistered; everything else registers.
-    let connection = if interactive { connection()? } else { Connection::session()? };
+    let connection = Connection::session()?;
     let proxy = portal(&connection, "org.freedesktop.portal.Screenshot")?;
     let id = token();
-    let options = Options::from([("handle_token".into(), text(&id)), ("interactive".into(), interactive.into())]);
+    let options = Options::from([("handle_token".into(), text(&id)), ("interactive".into(), false.into())]);
     let mut result = request(&connection, &id, || Ok(proxy.call("Screenshot", &("", options))?))?;
     let uri = String::try_from(result.remove("uri").context("screenshot URI missing")?)?;
     let source = url::Url::parse(&uri)?.to_file_path().map_err(|_| anyhow::anyhow!("screenshot is not a local file"))?;

@@ -90,16 +90,12 @@ impl Observer {
         let changes = self.notices.transitions(agents, self.finished);
         if self.notifications {
             for agent in changes {
-                let message = if crate::string(&agent, "question").is_empty() {
-                    crate::string(&agent, "lastMessage")
-                } else {
-                    crate::string(&agent, "question")
-                };
+                let message = if text(&agent, "question").is_empty() { text(&agent, "lastMessage") } else { text(&agent, "question") };
                 crate::os::notify(
                     self.tx.clone(),
-                    crate::string(&agent, "id").into(),
-                    format!("{} · {}", crate::string(&agent, "handle"), crate::state_label(crate::string(&agent, "state"))),
-                    crate::short(message, 240),
+                    text(&agent, "id").into(),
+                    format!("{} · {}", text(&agent, "handle"), state_label(&agent)),
+                    short(message, 240),
                 );
             }
         }
@@ -166,7 +162,7 @@ impl Sidecar {
             for line in BufReader::new(output).lines() {
                 let event = line.map_err(anyhow::Error::from).and_then(|l| serde_json::from_str(&l).context("invalid engine response"));
                 if let Ok(value) = &event {
-                    let kind = crate::string(value, "type");
+                    let kind = text(value, "type");
                     if kind == "hello" {
                         compatible.store(value["protocol"] == 3, Ordering::SeqCst);
                     }
@@ -242,6 +238,23 @@ impl Drop for Sidecar {
 #[cfg(test)]
 pub fn test_sender() -> (Sidecar, EngineSender) {
     tests::test_sender()
+}
+
+fn text<'a>(value: &'a Value, key: &str) -> &'a str {
+    value[key].as_str().unwrap_or("")
+}
+
+/// The agent's state the way the Mac names it ("Needs you", "Your turn"…).
+fn state_label(agent: &Value) -> &'static str {
+    serde_json::from_value::<crate::model::AgentState>(agent["state"].clone()).unwrap_or_default().label()
+}
+
+fn short(text: &str, count: usize) -> String {
+    let mut result: String = text.chars().take(count).collect();
+    if text.chars().count() > count {
+        result.push('…');
+    }
+    result
 }
 
 #[cfg(test)]

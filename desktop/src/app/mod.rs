@@ -2,8 +2,6 @@
 //! windows. Engine events update the model (`engine.rs`); what people do arrives as `UiAction`s
 //! and becomes effects in exactly one place (`apply.rs`); the pill and panel windows live in
 //! `windows.rs`. Runs with `--shell` until it replaces the legacy UI.
-// The new UI path is built while the legacy UI is still the default (CONTRACT §10).
-#![allow(dead_code)]
 
 /// Event trace for hands-on checks: `LANTERN_DEBUG=1`.
 macro_rules! trace {
@@ -57,9 +55,7 @@ enum Pending {
     Focus {
         agent_id: String,
     },
-    History {
-        agent_id: String,
-    },
+    History,
     Launch,
     /// A message sent without the composer (Point & Ask).
     Direct {
@@ -96,9 +92,9 @@ pub struct Lantern {
     auth: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// The system keyring's sign-in store.
     vault: Option<Sender<crate::account::VaultCommand>>,
-    /// An action to run once the engine has said which agents are installed (`--new-session`, the
-    /// tray, a hotkey).
-    on_ready: Option<UiAction>,
+    /// What the launch asked for (`--new-session`, `--settings`…), once the engine has said which
+    /// agents are installed.
+    on_ready: Option<String>,
     /// Results of work done off the frame loop (captures, the folder picker).
     tx: Sender<Event>,
     events: Receiver<Event>,
@@ -356,9 +352,9 @@ impl eframe::App for Lantern {
         }
         self.tick();
         if self.model.new_session.installed.is_some()
-            && let Some(action) = self.on_ready.take()
+            && let Some(id) = self.on_ready.take()
         {
-            self.apply(action);
+            self.activate(&id);
         }
         self.assets.get_or_insert_with(|| Assets::load(&ctx));
         self.frame(ui);
@@ -371,8 +367,10 @@ impl eframe::App for Lantern {
 }
 
 /// `--shell`: the Mac-parity app (pill + panel). The legacy window stays the default until it's done.
-/// `start`: what to open once the engine is ready (`--new-session`).
-pub fn run(terminal: &str, start: Option<UiAction>) -> Result<()> {
+/// Runs Lantern. `start`: what the launch asked for (an activation, e.g. "new"), opened once the
+/// engine is ready.
+pub fn run(terminal: &str, start: Option<&str>) -> Result<()> {
+    let start = start.map(str::to_string);
     let engine = Sidecar::with_terminal(terminal)?;
     let options = windows::options();
     eframe::run_native(
@@ -401,7 +399,38 @@ fn load_state() -> (Prefs, Turns) {
     if cfg!(test) {
         return Default::default();
     }
-    let Ok(text) = std::fs::read_to_string(state_path()) else { return Default::default() };
+    let Ok(text) = std::fs::read_to_string(state_path()) else {
+        return (carried_over(&crate::settings::Settings::load().unwrap_or_default()), Turns::default());
+    };
     let value: Value = serde_json::from_str(&text).unwrap_or_default();
     (serde_json::from_value(value["prefs"].clone()).unwrap_or_default(), serde_json::from_value(value["turns"].clone()).unwrap_or_default())
+}
+
+/// A first run after the earlier window: keep the choices people made there.
+fn carried_over(old: &crate::settings::Settings) -> Prefs {
+    Prefs {
+        notifications: old.notifications,
+        notify_finished: old.notify_finished,
+        toolkit_in_sessions: old.toolkit,
+        bus_for_sessions: old.bus,
+        automatic_updates: old.check_updates,
+        welcomed: old.welcome_seen,
+        open_at_login: crate::settings::autostart_enabled(),
+        ..Prefs::default()
+    }
+}
+
+#[cfg(test)]
+mod carry_over_tests {
+    #[test]
+    fn the_earlier_windows_choices_carry_over() {
+        let old: crate::settings::Settings = serde_json::from_str(
+            r#"{"notifications":false,"notify_finished":true,"toolkit":false,"bus":true,"check_updates":true,"welcome_seen":true,"scale":1.2,"light":true}"#,
+        )
+        .unwrap();
+        let prefs = super::carried_over(&old);
+        assert!(!prefs.notifications && prefs.notify_finished && !prefs.toolkit_in_sessions && prefs.bus_for_sessions);
+        assert!(prefs.automatic_updates && prefs.welcomed);
+        assert_eq!(prefs.pill_top, 0.72, "everything else starts as on the Mac");
+    }
 }

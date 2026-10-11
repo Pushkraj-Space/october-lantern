@@ -1,17 +1,15 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Serialize, Deserialize)]
+/// `settings.json`: the engine's terminal and local dictation, and the earlier window's choices,
+/// which a first run of this app carries over into its preferences (`app::load_state`). Other
+/// fields an older file has are ignored.
+#[derive(Clone, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub light: bool,
-    pub scale: f32,
     pub notifications: bool,
     pub notify_finished: bool,
-    pub always_on_top: bool,
-    pub close_to_tray: bool,
-    pub global_shortcuts: bool,
     pub check_updates: bool,
     pub welcome_seen: bool,
     pub terminal: String,
@@ -24,13 +22,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            light: false,
-            scale: 1.0,
             notifications: true,
             notify_finished: false,
-            always_on_top: false,
-            close_to_tray: false,
-            global_shortcuts: false,
             check_updates: false,
             welcome_seen: false,
             terminal: String::new(),
@@ -88,12 +81,7 @@ impl Settings {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let mut settings: Self = serde_json::from_slice(&std::fs::read(path)?)?;
-        settings.scale = if settings.scale.is_finite() { settings.scale.clamp(0.8, 1.6) } else { 1.0 };
-        Ok(settings)
-    }
-    pub fn save(&self) -> Result<()> {
-        private_write(&config_dir().join("settings.json"), &serde_json::to_vec_pretty(self)?)
+        Ok(serde_json::from_slice(&std::fs::read(path)?)?)
     }
 }
 #[cfg(target_os = "linux")]
@@ -127,10 +115,11 @@ pub fn autostart_executable(enable: bool, executable: &Path) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn old_settings_receive_defaults() {
-        let settings: Settings = serde_json::from_str("{\"light\":true}").unwrap();
-        assert!(settings.light && settings.notifications && settings.toolkit);
-        assert!(!settings.bus);
+    fn old_settings_files_still_load() {
+        // The earlier window's own fields (theme, scale, compact…) are ignored; the rest default.
+        let settings: Settings = serde_json::from_str("{\"light\":true,\"scale\":1.4,\"terminal\":\"kitty\"}").unwrap();
+        assert!(settings.notifications && settings.toolkit && !settings.bus);
+        assert_eq!(settings.terminal, "kitty");
     }
     #[test]
     fn atomic_files_are_private_and_replace_complete_content() {

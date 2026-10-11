@@ -34,21 +34,12 @@ pub enum Event {
         result: Result<String, String>,
     },
     Activate(String),
-    Compact,
     Quit,
     Tray(bool),
     Shortcuts(bool),
     Account {
         generation: u64,
         result: Result<crate::account::Session, String>,
-    },
-    Ask {
-        generation: u64,
-        result: Result<String, String>,
-    },
-    AskDelta {
-        generation: u64,
-        text: String,
     },
     Update(Result<crate::updates::Release, String>),
     /// A piece of an Ask Lantern answer, for the question `generation` and its `turn`.
@@ -96,17 +87,7 @@ pub fn set_tray_menu(items: Vec<Option<(String, String)>>) {
     }
 }
 pub fn tray_menu() -> Vec<Option<(String, String)>> {
-    let menu = TRAY_MENU.read().unwrap_or_else(|e| e.into_inner()).clone();
-    if !menu.is_empty() {
-        return menu;
-    }
-    // The legacy window's own menu.
-    vec![
-        Some(("Show Lantern".into(), "show".into())),
-        Some(("Compact lantern".into(), "compact".into())),
-        None,
-        Some(("Quit".into(), "quit".into())),
-    ]
+    TRAY_MENU.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 /// The Linux tray refreshes its menu when this changes (the Windows tray builds it on each open).
 #[cfg(target_os = "linux")]
@@ -117,7 +98,6 @@ pub fn tray_menu_version() -> u64 {
 pub fn tray_event(id: &str) -> Event {
     match id {
         "quit" => Event::Quit,
-        "compact" => Event::Compact,
         other => Event::Activate(other.into()),
     }
 }
@@ -130,7 +110,7 @@ pub fn event_pump(wake: impl Fn(bool) + Send + 'static) -> (Sender<Event>, mpsc:
     std::thread::spawn(move || {
         let mut tray = false;
         for event in rx {
-            let show = matches!(event, Event::Activate(_) | Event::Compact) || matches!(event, Event::Tray(false)) && tray;
+            let show = matches!(event, Event::Activate(_)) || matches!(event, Event::Tray(false)) && tray;
             if let Event::Tray(available) = &event {
                 tray = *available;
             }

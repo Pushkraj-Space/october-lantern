@@ -10,6 +10,9 @@ impl Lantern {
     /// Starts the tray, the single-instance bridge (which also serves the GNOME edge extension),
     /// notifications and the global shortcuts.
     pub(super) fn start_desktop(&mut self) {
+        // Screenshots older than a week go; whether Lantern opens at login is read from the system.
+        std::thread::spawn(crate::os::prune_screenshots);
+        self.model.prefs.open_at_login = crate::settings::autostart_enabled();
         let snapshot = Arc::new(RwLock::new("[]".to_string()));
         crate::os::tray(self.tx.clone());
         crate::os::bridge(self.tx.clone(), snapshot.clone());
@@ -62,6 +65,14 @@ impl Lantern {
                 }
                 self.windows.show_pill(hidden);
                 self.publish_tray_menu();
+                return;
+            }
+            // A launch of the earlier app, or an old shortcut, still opens what it meant.
+            "ask" => UiAction::Compose { agent_id: None },
+            "connections" => UiAction::SetPanel(Some(PanelMode::October)),
+            "help" => UiAction::ShowWelcome,
+            "compact" => {
+                self.windows.show_pill(true);
                 return;
             }
             "inbox" => UiAction::SetPanel(Some(PanelMode::Inbox)),

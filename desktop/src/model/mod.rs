@@ -1,8 +1,6 @@
 //! Lantern's domain state, mirroring the Mac app's `AppModel` (macos/Sources/OctoberLantern).
 //! `ui/` reads it through `&Model` and never mutates it; every change goes through
 //! `app::Lantern::apply`. Engine payloads are typed here (see protocol/README.md).
-// The new UI path is built while the legacy UI is still the default (CONTRACT §10).
-#![allow(dead_code)]
 
 pub mod drafts;
 pub mod inbox;
@@ -702,10 +700,6 @@ impl Model {
     }
     pub fn chat_agent(&self) -> Option<&Agent> {
         self.chat.as_ref().and_then(|chat| self.agent(&chat.agent_id))
-    }
-    /// A chosen recipient that has gone away; it is never silently replaced.
-    pub fn recipient_missing(&self, drafts: &Drafts) -> bool {
-        drafts.recipient().is_some_and(|id| self.agent(id).is_none())
     }
     pub fn badge(&self) -> usize {
         self.inbox.new.len()

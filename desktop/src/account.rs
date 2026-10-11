@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use base64::Engine;
 use serde_json::{Value, json};
 use sha2::Digest;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{
     Arc,
@@ -218,101 +218,6 @@ pub fn restore() -> Result<Session> {
 pub fn logout(access: String) {
     let _ = agent().post(&format!("{AUTH}/logout")).header("apikey", KEY).header("Authorization", &format!("Bearer {access}")).send_empty();
 }
-pub fn ask(
-    access: String,
-    question: String,
-    screenshot: Option<std::path::PathBuf>,
-    model: String,
-    history: Vec<Value>,
-    mut sink: impl FnMut(&str) -> bool,
-) -> Result<String> {
-    let image = screenshot
-        .map(|path| -> Result<String> {
-            let bytes = std::fs::read(path)?;
-            anyhow::ensure!(bytes.len() <= 20 * 1024 * 1024, "Image exceeds 20 MB");
-            Ok(base64::engine::general_purpose::STANDARD.encode(ask_image(&bytes)?))
-        })
-        .transpose()?;
-    let question: String = question.chars().take(4000).collect();
-    let mut request = json!({"question":question,"history":history,"client":{"app":"lantern","version":env!("CARGO_PKG_VERSION")}});
-    if let Some(image) = &image {
-        request["image"] = image.clone().into();
-    }
-    match agent()
-        .post("https://www.october.dev/api/lantern/ask")
-        .header("Authorization", &format!("Bearer {access}"))
-        .header("Accept", "text/event-stream")
-        .send_json(request)
-    {
-        Ok(mut response) => return read_answer_stream(response.body_mut().as_reader(), &mut sink),
-        Err(ureq::Error::StatusCode(404 | 405)) => {}
-        Err(error) => return Err(error.into()),
-    }
-    let agent = agent();
-    let model = if model.trim().is_empty() {
-        let mut response = agent.get("https://www.october.dev/v1/models").header("Authorization", &format!("Bearer {access}")).call()?;
-        let models: Value = response.body_mut().with_config().limit(1024 * 1024).read_json()?;
-        let models = models["data"].as_array().context("No October models available")?;
-        let chosen = models
-            .iter()
-            .find(|model| model["capabilities"]["vision"] == true)
-            .or_else(|| if image.is_none() { models.first() } else { None })
-            .context("No vision model available; choose a vision model in Point & Ask")?;
-        chosen["id"].as_str().context("Model has no identifier")?.to_string()
-    } else {
-        model
-    };
-    let content = match image {
-        Some(image) => {
-            json!([{"type":"text","text":question},{"type":"image_url","image_url":{"url":format!("data:image/jpeg;base64,{image}")}}])
-        }
-        None => json!(question),
-    };
-    let mut messages = history;
-    messages.push(json!({"role":"user","content":content}));
-    let mut response = agent
-        .post("https://www.october.dev/v1/chat/completions")
-        .header("Authorization", &format!("Bearer {access}"))
-        .header("Accept", "text/event-stream")
-        .send_json(json!({"model":model,"messages":messages,"stream":true,"max_tokens":1200}))?;
-    read_answer_stream(response.body_mut().as_reader(), &mut sink)
-}
-fn ask_image(bytes: &[u8]) -> Result<Vec<u8>> {
-    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)?.thumbnail(1600, 1600).to_rgb8();
-    let mut jpeg = Vec::new();
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 80).encode_image(&image)?;
-    Ok(jpeg)
-}
-#[cfg(test)]
-fn read_answer(reader: impl Read) -> Result<String> {
-    read_answer_stream(reader, &mut |_| true)
-}
-fn read_answer_stream(reader: impl Read, sink: &mut impl FnMut(&str) -> bool) -> Result<String> {
-    let mut answer = String::new();
-    for line in BufReader::new(reader.take(2 * 1024 * 1024)).lines() {
-        let line = line?;
-        let Some(payload) = line.strip_prefix("data:").map(str::trim) else { continue };
-        if payload == "[DONE]" {
-            break;
-        }
-        let event: Value = serde_json::from_str(payload)?;
-        anyhow::ensure!(
-            event["type"] != "error" && event["error"].is_null(),
-            "{}",
-            event["message"].as_str().or(event["error"]["message"].as_str()).unwrap_or("October AI request failed")
-        );
-        if event["type"] == "done" {
-            break;
-        }
-        if let Some(text) = event["text"].as_str().filter(|_| event["type"] == "delta").or(event["choices"][0]["delta"]["content"].as_str())
-        {
-            anyhow::ensure!(sink(text), "Answer cancelled");
-            answer.push_str(text);
-        }
-    }
-    anyhow::ensure!(!answer.trim().is_empty(), "October returned no answer");
-    Ok(answer)
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,30 +298,10 @@ mod tests {
         assert!(matches!(vault_rx.recv_timeout(Duration::from_secs(3)).unwrap(), VaultCommand::Clear));
     }
     #[test]
-    fn ask_images_are_bounded_jpeg() {
-        let source = image::DynamicImage::new_rgb8(3200, 1800);
-        let mut png = std::io::Cursor::new(Vec::new());
-        source.write_to(&mut png, image::ImageFormat::Png).unwrap();
-        let encoded = ask_image(png.get_ref()).unwrap();
-        assert!(encoded.starts_with(&[0xff, 0xd8]));
-        let decoded = image::load_from_memory(&encoded).unwrap();
-        assert_eq!((decoded.width(), decoded.height()), (1600, 900));
-    }
-    #[test]
     fn callback_rejects_wrong_paths_and_duplicate_codes() {
         assert!(callback_code("/elsewhere?code=x").is_err());
         assert!(callback_code("/callback?code=a&code=b").is_err());
         assert!(callback_code("/callback?code=").is_err());
         assert_eq!(callback_code("/callback?code=a%2Bb").unwrap(), "a+b");
-    }
-    #[test]
-    fn parses_both_streams_and_propagates_errors() {
-        assert_eq!(
-            read_answer(b"data: {\"type\":\"delta\",\"text\":\"Hello\"}\n\ndata: {\"type\":\"done\"}\n".as_slice()).unwrap(),
-            "Hello"
-        );
-        assert_eq!(read_answer(b"data: {\"choices\":[{\"delta\":{\"content\":\"World\"}}]}\ndata: [DONE]\n".as_slice()).unwrap(), "World");
-        assert!(read_answer(b"data: {\"type\":\"error\",\"message\":\"Denied\"}\n".as_slice()).is_err());
-        assert!(read_answer_stream(b"data: {\"type\":\"delta\",\"text\":\"Late answer\"}\n".as_slice(), &mut |_| false).is_err());
     }
 }

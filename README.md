@@ -111,7 +111,7 @@ No. Keep opening your agents in your usual terminals. Lantern discovers supporte
 <details>
 <summary><strong>Is Lantern free? Does it work on Windows or Linux?</strong></summary>
 
-The core Mac app is free, and it stays free forever. The source code is licensed under Apache 2.0. If you have a paid October plan, sign in and your plan's extras, like cloud agents, are available in Lantern automatically. Lantern currently runs on macOS 14 or later, on Apple silicon and Intel. A native Rust desktop app is now available from source on Linux (Wayland and X11). The original macOS app remains available. A Windows preview builds from source: it finds agents, shows their conversations, and starts sessions you can reply to from Lantern.
+The core Mac app is free, and it stays free forever. The source code is licensed under Apache 2.0. If you have a paid October plan, sign in and your plan's extras, like cloud agents, are available in Lantern automatically. Lantern currently runs on macOS 14 or later, on Apple silicon and Intel. Lantern for Linux and Windows builds from source: the same pill and panel as the Mac app, written in Rust (Windows is a preview).
 
 </details>
 
@@ -135,7 +135,24 @@ To uninstall, open **Settings → About → Uninstall October Lantern**. This re
 
 Want to improve Lantern or add support for your favorite agent? The app uses Swift / AppKit / SwiftUI, with a Rust engine for agent discovery and terminal integration.
 
-### Linux (Rust UI + Rust engine sidecar)
+### Linux and Windows (Rust)
+
+`desktop/` is the Linux and Windows app: the Mac app's design and behaviour in Rust (egui).
+Lantern is a small pill at the edge of the screen; hover it for its actions, click the
+lantern for Ask Lantern, and its panel opens beside it with Waiting, Your agents, chats,
+New Session and October. Point & Ask, notifications, the tray and global shortcuts
+(Ctrl+Alt+Space messages an agent, Ctrl+Alt+P starts Point & Ask) work as on the Mac.
+`--new-session`, `--point-ask`, `--ask`, `--connections`, `--settings` and `--welcome`
+open those directly (a second launch hands them to the running Lantern), and
+`--fixture FILE.json --out FILE.png --scale 2` renders any surface from a saved model.
+
+Where a platform can't do what the Mac does, Lantern does the closest thing and says so:
+GNOME has no backdrop blur, so the glass is a tinted fill; on Wayland the pill runs through
+XWayland (a Wayland app can't place its own window), and Point & Ask can't pick another
+app's window, so a click takes the whole screen; without a tray host (GNOME needs the
+AppIndicator extension) the lantern's right-click menu also has Quit.
+
+#### Linux
 
 Install a current stable Rust toolchain from [rustup](https://rustup.rs), a C compiler,
 Mesa/OpenGL, and your distribution's Wayland/X11 runtime libraries. Install `tmux`
@@ -158,23 +175,21 @@ are placed in `build/linux/`; keep them together. The desktop starts the engine 
 its sidecar using the same JSON-lines protocol as the Mac app. `LANTERN_ENGINE`
 can override its path during development.
 
-The Linux UI has a searchable session sidebar, Markdown conversations, per-session
-drafts, screenshot attachments, permission controls, model selection, and terminal
-or background launches. It sends replies through the engine's safety checks.
-Agents in ordinary terminals are discovered too; run them inside `tmux` to send
-direct replies. Clipboard replies work for other terminals. Supported terminal
+Replies go through the engine's safety checks. Agents in ordinary terminals are
+discovered too; sessions started In Lantern run in `tmux` and take direct replies, and
+agents in your own terminals do too when they run inside `tmux`. Clipboard replies work for other terminals. Supported terminal
 launchers include Ptyxis, GNOME Terminal, Konsole, Kitty, Alacritty, Ghostty, Foot,
 WezTerm, Xfce Terminal, and xterm. Set `LANTERN_TERMINAL` to a supported executable
 name or absolute path to choose one.
 
 Linux data lives under `${XDG_DATA_HOME:-~/.local/share}/october-lantern`.
-Preferences live in `${XDG_CONFIG_HOME:-~/.config}/october-lantern/settings.json`.
-Settings includes light/dark themes, scaling, autostart, notifications, global
-shortcuts, terminal selection, toolkit refresh and optional hook installation.
-Hooks back up and update supported agents' configuration. Screenshot and file
-selection use XDG desktop portals; shortcuts require approval in the desktop dialog.
-Notifications, the edge session list, and credential refresh continue independently
-of UI frames while the window is minimized or the desktop is locked. Repeated
+Preferences live in `${XDG_CONFIG_HOME:-~/.config}/october-lantern/lantern-state.json`
+(the terminal and dictation paths in `settings.json` beside it). Settings has the
+Mac's sections: open at login, the pill's edge, shortcuts, updates, new-session
+defaults, agent hooks, notifications and which agents count in Waiting. Hooks back up and
+update supported agents' configuration. Screenshots and the folder picker use XDG
+desktop portals; shortcuts need approval in the desktop's dialog once. Notifications and
+credential refresh continue while the desktop is locked. Repeated
 snapshots are coalesced so they do not build up in the background.
 Screenshots are private files, pruned after a week; audio recordings are removed
 after dictation. Lantern never sends dictation audio to a cloud service.
@@ -200,22 +215,12 @@ The native Bus executable lives beside the engine. New sessions can enable Bus
 and share the local toolkit; no October account is needed. `LANTERN_BUS_BIN` can
 override the bundled binary for development.
 
-Connections exposes October account sign-in, October Desktop pairing, and phone
-QR/code comparison, cancellation and device revocation. Saved sign-in uses the
-Linux Secret Service through `secret-tool`; without it, sign-in works for the
-current session. Point & Ask streams October AI answers, supports follow-up
-questions and can move a question/image into a session draft. October receives
-questions and screenshots only when you press Ask. Live account and phone flows
-need credentials, the phone app and a qualifying plan; they have not been verified
-end to end in this Linux environment.
-
-Compact mode is available on all desktops. Tray controls need a StatusNotifier
-host (GNOME typically needs AppIndicator). Settings can install the optional
-GNOME 49/50 edge extension: hover the floating lantern for the agent list and
-click a session to open it. A new extension may need logout/login before enabling.
-Wayland window positioning and stacking remain under the compositor's control.
-On Wayland, close-to-tray minimizes the window; restore it from the overview or
-the GNOME edge control. X11 supports hiding and restoring the tray window directly.
+The October panel has October account sign-in and October Desktop pairing. Saved
+sign-in uses the Linux Secret Service through `secret-tool`; without it, sign-in works
+for the current session. Ask Lantern and Point & Ask stream October AI answers with
+follow-up questions; October receives a question (and Point & Ask's screenshot) only
+when you ask. October Harness, the default agent when Claude Code and Codex aren't
+installed, installs itself with its own checksum-verified Node.js.
 
 The app can check Linux updates daily when enabled, and install a checksum-verified
 native bundle on request. `scripts/package-linux.sh` creates the bundle and SHA-256
@@ -226,9 +231,9 @@ needed before the updater can offer it. This fork uses its own releases; set
 It never uses Mac release assets. Database history is read directly with bundled
 SQLite, so the app does not need a system `sqlite3` executable.
 
-### Windows (preview)
+#### Windows (preview)
 
-The Linux desktop and engine also build for Windows 10 and 11. Install stable Rust
+The same app and engine build for Windows 10 and 11. Install stable Rust
 from [rustup](https://rustup.rs) with the MSVC toolchain (Visual Studio Build Tools),
 then from PowerShell in the repository root:
 
@@ -260,10 +265,10 @@ What works: Lantern finds Claude Code, Codex and the other supported agents runn
 in Windows Terminal, VS Code, Cursor, WezTerm and plain console windows, including
 npm installs. It shows their state, last message and full conversation. Open brings
 the agent's terminal window to the front (the window, not the exact tab). You also
-get a tray icon, notifications, Ctrl+Alt+L to show Lantern, start at sign-in, saved
-sign-in in Windows Credential Manager, and agent hooks.
+get the tray menu, notifications, the global shortcuts, start at sign-in, saved sign-in in
+Windows Credential Manager, and agent hooks.
 
-Replies go to sessions Lantern starts (New Session, Ctrl+N). Lantern runs the agent in a
+Replies go to sessions Lantern starts (New Session). Lantern runs the agent in a
 session of its own (a ConPTY pseudo console, in place of tmux) that keeps running when
 you close Lantern. Open terminal shows it in a Windows Terminal tab, or a console window
 when Windows Terminal isn't installed, and closing that window leaves the agent running.
@@ -274,7 +279,7 @@ on that session's console. Agents you start in your own terminal are followed bu
 typed into: Windows has no safe way to type into another app's terminal.
 
 Sessions can join October Bus like on Linux. Screenshots (Point & Ask and New Session)
-capture the display under the pointer with Lantern's own window left out. Dictation
+capture the display under the pointer with Lantern's own windows left out. Dictation
 records your default microphone and transcribes on this computer with whisper.cpp, after
 `scripts/setup-dictation.ps1`. The app installs updates itself on request: it downloads
 the release zip, checks its SHA-256 and that every program is a native Windows build,
@@ -283,8 +288,9 @@ and points the Start menu shortcut there. Agent sessions, their windows and the 
 from Lantern's own copies in its data folder, so updating or reinstalling never stops
 them. Data lives in `%LOCALAPPDATA%\October Lantern`, preferences in
 `%APPDATA%\October Lantern`. The
-preview is built and tested in CI. It hasn't been tried by hand on a Windows machine
-yet, so please report what you find.
+preview is built and tested in CI (`scripts/check-windows-types.sh` also type-checks the
+Windows code from Linux). It hasn't been tried by hand on a Windows machine yet, so please
+report what you find.
 
 ### macOS
 

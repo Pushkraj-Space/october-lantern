@@ -172,7 +172,7 @@ impl Lantern {
                 || kind.as_str() == AgentKind::OCTOBER
                     && (harness == Some(HarnessState::Ready) || self.needs_harness() && harness != Some(HarnessState::Failed))
         };
-        [AgentKind(self.model.prefs.default_task_agent.clone()), AgentKind::new("claude"), AgentKind::new("codex")]
+        [AgentKind(self.model.prefs.default_task_agent.clone()), AgentKind::new(AgentKind::CLAUDE), AgentKind::new(AgentKind::CODEX)]
             .into_iter()
             .find(usable)
             .or_else(|| installed.first().cloned())
@@ -180,7 +180,11 @@ impl Lantern {
 
     /// Neither Claude Code nor Codex is installed: October Harness is what this computer can run.
     pub(super) fn needs_harness(&self) -> bool {
-        self.model.new_session.installed.as_ref().is_some_and(|kinds| !kinds.iter().any(|k| matches!(k.as_str(), "claude" | "codex")))
+        self.model
+            .new_session
+            .installed
+            .as_ref()
+            .is_some_and(|kinds| !kinds.iter().any(|k| [AgentKind::CLAUDE, AgentKind::CODEX].contains(&k.as_str())))
     }
 
     /// The project the person named (matched against recent folders, then agents' folders, newest

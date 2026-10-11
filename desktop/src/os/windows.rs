@@ -111,17 +111,10 @@ pub fn show_existing(action: &str) -> bool {
     false
 }
 
-/// Windows can always show a hidden window again; nothing to do.
-pub fn raise_window() {}
-
 /// Lets the engine bring a terminal window to the front (Windows only lets the foreground app
 /// pass that on).
 pub fn allow_focus(pid: u32) {
     unsafe { AllowSetForegroundWindow(pid) };
-}
-
-pub fn edge_install() -> Result<String> {
-    bail!("The edge lantern is a GNOME extension")
 }
 
 pub fn open(path: impl AsRef<OsStr>) -> Result<()> {
@@ -136,33 +129,10 @@ pub fn open(path: impl AsRef<OsStr>) -> Result<()> {
 
 // ---------- screenshots ----------
 
-/// Lantern's main window, left out of its own screenshots.
-static MAIN_WINDOW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-pub fn set_main_window(hwnd: isize) {
-    MAIN_WINDOW.store(hwnd as usize, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// The display under the pointer, as a PNG in Lantern's screenshots folder. Lantern's window is
-/// excluded from capture just for this moment (Windows 10 2004 and later), so screen sharing and
-/// other apps still see it the rest of the time.
-/// The display under the pointer, without a chooser (Windows has none to show).
+/// The display under the pointer, as a PNG in Lantern's screenshots folder, without a chooser
+/// (Windows has none to show). Lantern's own windows draw nothing while it's taken.
 pub fn capture_screen() -> Result<PathBuf> {
-    screenshot()
-}
-pub fn screenshot() -> Result<PathBuf> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
-    let window = MAIN_WINDOW.load(std::sync::atomic::Ordering::Relaxed) as HWND;
-    let hidden = !window.is_null() && unsafe { SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE) } != 0;
-    if hidden {
-        // The change shows on the next composed frame.
-        std::thread::sleep(Duration::from_millis(150));
-    }
-    let image = capture_display();
-    if hidden {
-        unsafe { SetWindowDisplayAffinity(window, WDA_NONE) };
-    }
-    let image = image?;
+    let image = capture_display()?;
     let mut png = Vec::new();
     image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
     anyhow::ensure!(png.len() <= 20 * 1024 * 1024, "screenshot must be a PNG under 20 MB");
