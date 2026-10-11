@@ -237,7 +237,7 @@ pub enum UiAction {
     Quit,
 }
 
-/// The main panel, 380 wide. Returns the measured outer height. Placeholder until Atlas's surfaces land.
+/// The main panel, 380 wide. Returns the measured outer height.
 pub fn render_panel(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32) -> f32 {
     if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         cx.emit(if cx.model.launch_preview.is_some() && cx.model.panel.is_none_or(PanelMode::is_list) {
@@ -248,7 +248,8 @@ pub fn render_panel(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32) -> f32 {
             UiAction::SetPanel(None)
         });
     }
-    surface(ui, theme::PANEL_WIDTH, max_height, theme::PANEL_RADIUS as f32, 0.5, |ui| {
+    let tint = components::material_tint(0.5, cx.model.caps.backdrop_blur);
+    surface(ui, theme::PANEL_WIDTH, max_height, theme::PANEL_RADIUS as f32, tint, |ui| {
         feed::engine_banner(ui, cx);
         match cx.model.panel {
             Some(PanelMode::NewSession) => {

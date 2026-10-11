@@ -121,6 +121,13 @@ pub fn paint_glass(painter: &Painter, rect: Rect, radius: f32, tint: f32) {
     painter.add(glass_shape(rect, radius, tint));
 }
 
+/// Preserve the source tint when native backdrop blur is available. Without it, use a
+/// denser translucent fallback so sharp wallpaper does not overwhelm the content.
+/// This is an opacity fallback, not an implementation of live backdrop blur.
+pub fn material_tint(tint: f32, backdrop_blur: bool) -> f32 {
+    if backdrop_blur { tint } else { tint.max((0.85 - 0.35) / 0.65) }
+}
+
 /// Reserved-slot version, for surfaces whose measured height is only known after layout.
 pub fn glass_shape(rect: Rect, radius: f32, tint: f32) -> Shape {
     // Swift's glassSurface adds .35 black over GlassContainer's native tint.
@@ -508,6 +515,24 @@ mod tests {
         let (spinner, text, button) = centers.unwrap();
         assert!((spinner - text).abs() < 0.5, "spinner {spinner} vs text {text}");
         assert!((spinner - button).abs() < 0.5, "spinner {spinner} vs button {button}");
+    }
+
+    #[test]
+    fn material_fallback_reaches_eighty_five_percent_without_lightening_denser_glass() {
+        for tint in [0.45, 0.5, 0.62, 0.9, 1.0] {
+            assert_eq!(material_tint(tint, true), tint);
+            let fallback = material_tint(tint, false);
+            assert!(fallback >= tint);
+            assert!(0.35 + 0.65 * fallback >= 0.85 - f32::EPSILON);
+            let Shape::Vec(shapes) = glass_shape(Rect::from_min_size(Pos2::ZERO, egui::vec2(50.0, 100.0)), 22.0, fallback) else {
+                panic!("glass layers");
+            };
+            let Shape::Rect(fill) = &shapes[0] else {
+                panic!("glass fill");
+            };
+            assert!(fill.fill.a() >= 216);
+        }
+        assert_eq!(material_tint(0.9, false), 0.9);
     }
 
     #[test]
