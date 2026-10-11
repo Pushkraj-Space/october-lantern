@@ -41,6 +41,9 @@ const out = process.env.LANTERN_SMOKE_OUT;
 if (out && process.cwd().endsWith('project')) {
   fs.writeFileSync(path.join(out, 'args.json'), JSON.stringify(process.argv.slice(2)));
   process.stdin.on('data', (d) => fs.writeFileSync(path.join(out, 'reply.txt'), d));
+} else if (out) {
+  // An agent in a console of its own: what Lantern types arrives as console input.
+  process.stdin.on('data', (d) => fs.appendFileSync(path.join(out, 'console-reply.txt'), d));
 }
 setInterval(() => {}, 1000);
 """
@@ -65,10 +68,8 @@ with tempfile.TemporaryDirectory(prefix="lantern smoke-", ignore_cleanup_errors=
     env = dict(os.environ, USERPROFILE=str(folder / "home"), LOCALAPPDATA=str(folder / "data"),
                LANTERN_SMOKE_OUT=str(folder), PATH=f"{bin_dir};{os.environ['PATH']}",
                OCTOBER_BUS_RUNTIME_DIR=str(folder / "bus-runtime"), OCTOBER_BUS_DATA_DIR=str(folder / "bus-data"))
-    agent_proc = subprocess.Popen(
-        ["node", str(script)], cwd=folder, env=env,
-        stdin=subprocess.DEVNULL, creationflags=subprocess.CREATE_NEW_CONSOLE,
-    )
+    # Its own console, with the console as stdin (like an agent started in Windows Terminal).
+    agent_proc = subprocess.Popen(["node", str(script)], cwd=folder, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
     proc = subprocess.Popen(
         [str(ENGINE), "serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, env=env, bufsize=1, encoding="utf-8",
@@ -113,18 +114,23 @@ with tempfile.TemporaryDirectory(prefix="lantern smoke-", ignore_cleanup_errors=
         print("agent:", json.dumps({k: agent.get(k) for k in ("kind", "pid", "tty", "state", "host", "route")}))
         assert agent["kind"] == "claude", agent
         assert agent["tty"].startswith("con:"), agent
-        assert not agent["canReply"] and agent["route"]["via"] == "none", agent
+        assert agent["canReply"] and agent["route"]["via"] == "console", agent
 
         send({"type": "history", "requestId": "smoke-history", "agentId": agent["id"]})
         history = read_until(lambda v: v.get("requestId") == "smoke-history")
         texts = [m["text"] for m in history["messages"]]
         assert "Windows discovery works" in texts, history
 
-        # Lantern won't type into a terminal it didn't start.
-        send({"type": "reply", "requestId": "smoke-reply", "agentId": agent["id"], "text": "MUST NOT BE SENT"})
-        refused = read_until(lambda v: v.get("requestId") == "smoke-reply")
-        assert not refused["ok"], refused
-        print("PASS: console discovery, npm-installed Claude Code, transcript and history, reply refused")
+        # Lantern types into the agent's own console (console.rs): the reply arrives as its input.
+        send({"type": "reply", "requestId": "smoke-reply", "agentId": agent["id"], "text": "hello from Lantern & co"})
+        typed = read_until(lambda v: v.get("requestId") == "smoke-reply")
+        assert typed["ok"], typed
+        console_reply = folder / "console-reply.txt"
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and "hello from Lantern & co" not in (console_reply.read_text() if console_reply.exists() else ""):
+            time.sleep(0.2)
+        assert "hello from Lantern & co" in console_reply.read_text(), console_reply.read_text() if console_reply.exists() else "nothing arrived"
+        print("PASS: console discovery, npm-installed Claude Code, transcript and history, reply typed into its console")
 
         # A session Lantern starts: the message reaches the agent intact (no shell in between),
         # replies are typed into it, and nothing is typed once it has ended.

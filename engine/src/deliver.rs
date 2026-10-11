@@ -71,6 +71,10 @@ pub fn verify(agent: &Agent) -> Result<()> {
         let info = crate::pty::info(session).with_context(|| format!("@{}'s session", agent.handle))?;
         return check_session(agent, &live, &info, &procs::ancestors_of(agent.pid));
     }
+    if let Route::Console { .. } = &agent.route {
+        // The same process on the same console; who else is on it is checked while attached.
+        return check_identity(agent, &live);
+    }
     check(agent, &live)
 }
 
@@ -175,6 +179,7 @@ pub fn send_text(agent: &Agent, text: &str) -> Result<()> {
         Route::Terminal { tty } => osascript(TERMINAL_SEND, &[tty, &line], SEND_LIMIT, true).map(|_| ()),
         Route::Iterm { tty } => osascript(ITERM_SEND, &[tty, &line, "yes"], SEND_LIMIT, true).map(|_| ()),
         Route::Pty { session } => crate::pty::send_text(session, &line),
+        Route::Console { .. } => crate::console::send(agent, "text", &line),
         Route::None => bail!("Lantern can't type into {} yet", host_name(agent)),
     }
 }
@@ -199,6 +204,8 @@ pub fn send_key(agent: &Agent, key: Key) -> Result<()> {
         (Route::Iterm { tty }, Key::Char(c)) => osascript(ITERM_SEND, &[tty, &c.to_string(), "no"], SEND_LIMIT, true).map(|_| ()),
         (Route::Pty { session }, Key::Escape) => crate::pty::send_bytes(session, "\u{1b}"),
         (Route::Pty { session }, Key::Char(c)) => crate::pty::send_bytes(session, &c.to_string()),
+        (Route::Console { .. }, Key::Escape) => crate::console::send(agent, "key", "escape"),
+        (Route::Console { .. }, Key::Char(c)) => crate::console::send(agent, "key", &c.to_string()),
         (Route::October { .. }, _) => bail!("single keys aren't supported for October's agents yet"),
         // Terminal's `do script` always adds Enter, which could confirm the wrong thing.
         (Route::Terminal { .. }, _) => bail!("single keys aren't supported in Terminal"),
@@ -230,6 +237,10 @@ pub fn focus(agent: &Agent) -> Result<()> {
         Route::Terminal { tty } => osascript(TERMINAL_FOCUS, &[tty], SEND_LIMIT, false).map(|_| ()),
         Route::Iterm { tty } => osascript(ITERM_FOCUS, &[tty], SEND_LIMIT, false).map(|_| ()),
         Route::Pty { session } => focus_session(session),
+        #[cfg(windows)]
+        Route::Console { .. } => crate::platform::focus_window(agent.host.as_ref().map_or(0, |h| h.pid)),
+        #[cfg(not(windows))]
+        Route::Console { .. } => Ok(()),
         // Windows: the terminal's window, not the exact tab.
         #[cfg(windows)]
         Route::None if agent.host.is_some() => crate::platform::focus_window(agent.host.as_ref().map_or(0, |h| h.pid)),

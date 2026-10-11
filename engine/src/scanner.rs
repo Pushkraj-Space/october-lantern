@@ -104,6 +104,15 @@ fn arg_after<'a>(args: &'a [String], names: &[&str]) -> Option<&'a str> {
     args.iter().position(|a| names.contains(&a.as_str())).and_then(|i| args.get(i + 1)).map(String::as_str)
 }
 
+/// On Windows, an agent with a console of its own can be typed into through it (console.rs).
+fn console_route(tty: Option<&str>) -> Option<Route> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let host = tty?.strip_prefix("con:")?.parse().ok()?;
+    Some(Route::Console { host })
+}
+
 fn looks_like_id(s: &str) -> bool {
     s.len() >= 16 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
@@ -355,6 +364,9 @@ impl Scanner {
     fn route(&self, pid: u32, tty: Option<&str>, in_tmux: bool, host: Option<&HostApp>) -> Route {
         if in_tmux {
             return Route::Tmux;
+        }
+        if let Some(route) = console_route(tty) {
+            return route;
         }
         let app = host.map(|h| h.app.as_str()).unwrap_or("");
         let env = |key: &str| self.environ(pid, key);

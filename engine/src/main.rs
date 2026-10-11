@@ -10,6 +10,7 @@
 mod actions;
 mod apps;
 mod bus;
+mod console;
 mod deliver;
 mod harness;
 mod history;
@@ -45,6 +46,13 @@ fn main() -> Result<()> {
         Some("pty-host") => pty::host(args.get(1).map(String::as_str).unwrap_or("")),
         #[cfg(windows)]
         Some("attach") => pty::attach(args.get(1).map(String::as_str).unwrap_or("")),
+        // Types into an agent's own console (see console.rs); run by the engine, not by people.
+        #[cfg(windows)]
+        Some("console-type") => {
+            let number = |i: usize| args.get(i).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let text = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
+            console::type_into(number(1) as u32, number(2), text(3), text(4), text(5))
+        }
         Some("agents") | None => {
             let agents = scanner::Scanner::new().scan();
             println!("{}", serde_json::to_string_pretty(&agents)?);

@@ -157,7 +157,7 @@ pub struct Route {
 impl Route {
     /// Single keys (e.g. "1" to allow a permission prompt) can be sent without Enter.
     pub fn sends_keys(&self) -> bool {
-        matches!(self.via.as_str(), "tmux" | "cmux" | "iterm" | "pty")
+        matches!(self.via.as_str(), "tmux" | "cmux" | "iterm" | "pty" | "console")
     }
 }
 
