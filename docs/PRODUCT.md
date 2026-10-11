@@ -102,10 +102,10 @@ Lantern does **not** replace your terminals. Your agents keep running exactly wh
 4. Where to find everything.
 
 **Settings** (from the menu bar lantern) has four tabs:
-- **General:** open at login, which screen edge, the shortcut, automatic updates and the hooks.
-- **Notifications:** on or off, and whether finished turns notify too.
+- **General:** open at login, which screen edge, the two shortcuts and automatic updates; new sessions and tasks (screenshot, October Bus, the toolkit list); exact status (the hooks); notifications (on or off, and whether finished turns notify too).
 - **Agents:** which agents count toward Waiting and notifications.
-- **About:** version, check for updates, report a problem, the welcome guide, and uninstall.
+- **October:** the October account and October Desktop.
+- **About:** version, check for updates, anonymous usage counts (in builds that send them), report a problem, the welcome guide, and uninstall.
 
 **Menu bar.** A small lantern icon: Waiting, Agents, New Session or Task, Message an Agent, Show/Hide Lantern, Settings, Check for Updates, Report a Problem, Welcome Guide, Quit.
 
@@ -182,7 +182,7 @@ Lantern is in **beta (v0.4.3)**.
 ## Privacy
 
 - **Your code and conversations stay on your Mac unless you connect to October.** Without an October account, Lantern makes two kinds of network request: the daily update check (a public list of versions on GitHub), and anonymous usage counts (below).
-- **Anonymous usage counts (on by default, off in Settings › General or on the welcome screen).** Sent to PostHog (US), a few batched requests a day, so we can count daily and monthly users and see which features are used. Each event carries only its name, a random install id, the app version, the macOS version and the chip type, plus these details:
+- **Anonymous usage counts (on by default, off in Settings › About or on the welcome screen; macOS builds only: the Linux and Windows builds send none and don't show the setting).** Sent to PostHog (US), a few batched requests a day, so we can count daily and monthly users and see which features are used. Each event carries only its name, a random install id, the app version, the macOS version and the chip type, plus these details:
   - `lantern_active`, once a day: how many agents of each kind are running (e.g. 3 Claude Code, 1 Codex).
   - `reply_sent`, `reply_failed`, `reply_uncertain`, `reply_copied`: the agent's kind and how the reply was typed (tmux, cmux, Terminal…).
   - `permission_answered`: allow or deny, and the route.
