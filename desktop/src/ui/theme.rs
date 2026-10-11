@@ -32,6 +32,7 @@ pub enum Weight {
     Bold,
     Rounded,
     Mono,
+    MonoBold,
 }
 
 pub fn font(size: f32, weight: Weight) -> FontId {
@@ -42,6 +43,7 @@ pub fn font(size: f32, weight: Weight) -> FontId {
         Weight::Bold => "Inter Bold",
         Weight::Rounded => "Nunito Bold",
         Weight::Mono => "JetBrains Mono",
+        Weight::MonoBold => "JetBrains Mono Bold",
     };
     FontId::new(size, FontFamily::Name(name.into()))
 }
@@ -81,6 +83,7 @@ pub fn install(ctx: &egui::Context) {
         ("Inter Bold", include_bytes!("fonts/Inter-Bold.ttf").as_slice()),
         ("Nunito Bold", include_bytes!("fonts/Nunito-Bold.ttf").as_slice()),
         ("JetBrains Mono", include_bytes!("fonts/JetBrainsMono-Regular.ttf").as_slice()),
+        ("JetBrains Mono Bold", include_bytes!("fonts/JetBrainsMono-Bold.ttf").as_slice()),
     ] {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
         fonts.families.insert(FontFamily::Name(name.into()), vec![name.into(), "Inter Regular".into()]);

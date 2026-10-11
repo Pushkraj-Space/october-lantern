@@ -6,11 +6,13 @@
 
 pub mod assets;
 mod assistant;
+mod cards;
 mod chat;
 pub mod components;
 mod composer;
 mod feed;
 pub mod icons;
+mod october;
 mod sessions;
 pub mod theme;
 
@@ -51,9 +53,17 @@ pub struct UiState {
     #[serde(skip)]
     pub capture_texture: sessions::CaptureTexture,
     #[serde(skip)]
+    pub task_icon: sessions::CaptureTexture,
+    #[serde(skip)]
     pub assistant_focus: Option<u64>,
     #[serde(skip)]
     pub assistant_scroll_anchor: Option<(u64, u64)>,
+    pub account_use_email: bool,
+    pub account_email: String,
+    #[serde(skip)]
+    pub account_password: String,
+    #[serde(skip)]
+    pub desktop_flow: Option<(bool, f64)>,
 }
 
 pub struct Ctx<'a> {
@@ -244,7 +254,7 @@ pub fn render_panel(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32) -> f32 {
                 sessions::render(ui, cx, max_height);
             }
             Some(PanelMode::October) => {
-                placeholder(ui, cx, max_height, "October");
+                october::render(ui, cx, max_height);
             }
             Some(PanelMode::Assistant) => {
                 assistant::render(ui, cx, max_height);
@@ -395,9 +405,15 @@ mod tests {
             include_str!("../../fixtures/panel-assistant-thread.json"),
             include_str!("../../fixtures/panel-assistant-thinking.json"),
             include_str!("../../fixtures/panel-assistant-error.json"),
+            include_str!("../../fixtures/panel-october.json"),
+            include_str!("../../fixtures/panel-october-pending.json"),
+            include_str!("../../fixtures/panel-october-email.json"),
+            include_str!("../../fixtures/panel-october-pairing.json"),
+            include_str!("../../fixtures/panel-october-connected.json"),
+            include_str!("../../fixtures/panel-october-error.json"),
         ] {
             let mut fixture: crate::app::fixture::Fixture = serde_json::from_str(raw).unwrap();
-            let (height, actions, _) = frame(&ctx, &assets, &fixture.model, &mut fixture.inputs, &mut UiState::default(), Vec::new());
+            let (height, actions, _) = frame(&ctx, &assets, &fixture.model, &mut fixture.inputs, &mut fixture.view, Vec::new());
             assert!(height > 60.0 && height <= 900.0);
             assert!(actions.is_empty());
         }

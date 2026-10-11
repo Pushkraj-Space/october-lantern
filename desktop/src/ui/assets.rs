@@ -11,6 +11,10 @@ pub struct Assets {
     pub logo_idle: TextureHandle,
     pub october: TextureHandle,
     pub desktop_hero: TextureHandle,
+    pub google: TextureHandle,
+    pub github: TextureHandle,
+    /// Authored outline, not an extracted SF Symbol or a redistributed Apple font.
+    pub apple: TextureHandle,
     harnesses: HashMap<&'static str, TextureHandle>,
 }
 
@@ -42,6 +46,9 @@ impl Assets {
             logo_idle: upload(ctx, "logo/idle", &idle),
             october: texture(ctx, "october", include_bytes!("../../../macos/Resources/october.png")),
             desktop_hero: texture(ctx, "october/hero-palace", include_bytes!("../../../macos/Resources/october/hero-palace.jpg")),
+            google: svg_texture(ctx, "brands/google", include_bytes!("../../../macos/Resources/brands/google.svg")),
+            github: svg_texture(ctx, "brands/github", include_bytes!("../../../macos/Resources/brands/github.svg")),
+            apple: svg_texture(ctx, "brands/apple-authored", br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="#fff" d="M15.7 1.5c.3 2.1-1.2 4.2-3.4 4.5-.3-2 1.3-4 3.4-4.5ZM18.4 12.5c0-2 1.1-3.2 2.1-3.8-1.1-1.6-2.6-2.1-3.8-2.1-1.6-.1-2.9 1-3.9 1-1.1 0-2.4-1-3.9-1-2.9.1-4.8 2.5-4.8 5.8 0 4 2.8 9.3 5 9.3 1.2 0 1.6-.8 3.4-.8 1.7 0 2.1.8 3.4.8 1.8 0 3.7-3.1 4.5-5.1-1.2-.6-2-2.1-2-4.1Z"/></svg>"##),
             harnesses,
         }
     }
@@ -49,6 +56,27 @@ impl Assets {
     pub fn harness(&self, kind: &AgentKind) -> Option<&TextureHandle> {
         self.harnesses.get(kind.as_str())
     }
+}
+
+/// Canonical SVG brand marks rasterized once at 4x their 13pt display size. SVG parsing never
+/// happens in a render pass; the same pixels are used on both platforms and by fixtures.
+fn svg_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> TextureHandle {
+    let tree =
+        resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).unwrap_or_else(|error| panic!("bundled SVG {name}: {error}"));
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(52, 52).expect("brand pixmap");
+    let scale = (52.0 / tree.size().width()).min(52.0 / tree.size().height());
+    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale)
+        .post_translate((52.0 - tree.size().width() * scale) / 2.0, (52.0 - tree.size().height() * scale) / 2.0);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    // tiny-skia's RGBA is premultiplied. Undo that before egui performs its own conversion.
+    let mut rgba = pixmap.take();
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        let alpha = pixel[3] as u32;
+        for channel in &mut pixel[..3] {
+            *channel = (*channel as u32 * 255 + alpha / 2).checked_div(alpha).unwrap_or(0).min(255) as u8;
+        }
+    }
+    ctx.load_texture(name, ColorImage::from_rgba_unmultiplied([52, 52], &rgba), TextureOptions::LINEAR)
 }
 
 /// Decodes bundled PNG/JPEG bytes into a texture. Bundled art always decodes; a failure is a build mistake.

@@ -66,6 +66,45 @@ pub fn text_button(ui: &mut Ui, title: &str, size: f32, weight: Weight, color: C
     ui.add(egui::Button::new(text(title, size, weight, color)).frame(false).min_size(Vec2::ZERO))
 }
 
+/// Swift `.buttonStyle(.plain)`: no inherited egui button padding or minimum hit-box height.
+pub fn plain_button(ui: &mut Ui, title: &str, size: f32, weight: Weight, color: Color32) -> Response {
+    let galley = ui.painter().layout_no_wrap(title.into(), theme::font(size, weight), color);
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title));
+    ui.painter().galley(rect.min, galley, color);
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect.expand(2.0), 3.0, Stroke::new(1.0, theme::AMBER), egui::StrokeKind::Outside);
+    }
+    response
+}
+
+/// WelcomeView.swift's shared button styles (also used by AccountCard and DesktopCard).
+pub fn secondary_button(ui: &mut Ui, title: &str) -> Response {
+    styled_button(ui, title, false)
+}
+
+pub fn amber_button(ui: &mut Ui, title: &str) -> Response {
+    styled_button(ui, title, true)
+}
+
+fn styled_button(ui: &mut Ui, title: &str, amber: bool) -> Response {
+    let color = if amber { theme::black(0.85) } else { theme::INK };
+    let galley = ui.painter().layout_no_wrap(title.into(), theme::font(if amber { 13.0 } else { 12.0 }, Weight::Semibold), color);
+    let pad = if amber { egui::vec2(16.0, 8.0) } else { egui::vec2(12.0, 6.0) };
+    let (rect, response) = ui.allocate_exact_size(galley.size() + pad * 2.0, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title));
+    let pressed = response.is_pointer_button_down_on();
+    let fill =
+        if amber { theme::AMBER.gamma_multiply(if pressed { 0.8 } else { 1.0 }) } else { theme::white(if pressed { 0.18 } else { 0.1 }) };
+    let opacity = if ui.is_enabled() { 1.0 } else { 0.5 };
+    ui.painter().rect_filled(rect, if amber { 9.0 } else { 8.0 }, fill.gamma_multiply(opacity));
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color.gamma_multiply(opacity));
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect.expand(2.0), 10.0, Stroke::new(1.0, theme::AMBER), egui::StrokeKind::Outside);
+    }
+    response
+}
+
 /// Glass paint only: a dark tint plus source rim/sheen. Native live backdrop material is the
 /// shell's responsibility. Insert at a reserved paint slot behind content once its height is known.
 pub fn glass_surface(ui: &mut Ui, rect: Rect, radius: f32, tint: f32) {

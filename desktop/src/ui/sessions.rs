@@ -414,6 +414,10 @@ fn context(ui: &mut Ui, cx: &mut Ctx) {
             .inner_margin(Margin::symmetric(9, 6))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if let Some(texture) = app.icon.as_deref().and_then(|path| cx.view.task_icon.get(ui.ctx(), path).ok()).cloned() {
+                        ui.add(egui::Image::new(&texture).fit_to_exact_size(egui::Vec2::splat(20.0)));
+                    }
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         c::label(ui, format!("Work on {}", app.name), 12.5, Weight::Semibold, if on { t::INK } else { t::MUTED });
