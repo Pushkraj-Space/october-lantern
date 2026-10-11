@@ -78,6 +78,7 @@ impl Lantern {
             }
             UiAction::CancelSignIn => self.cancel_sign_in(),
             UiAction::SignOut => self.sign_out(),
+            UiAction::ToggleDictation { owner } => self.toggle_dictation(owner),
             UiAction::ShowSettings => self.windows.dialogs.settings = true,
             UiAction::ChangeSetting(change) => self.change_setting(change),
             UiAction::SetHooks { enabled } => self.set_hooks(enabled),
@@ -170,6 +171,7 @@ impl Lantern {
         if self.model.chat.as_ref().map(|chat| chat.agent_id.as_str()) != Some(agent_id) {
             self.model.chat = Some(Chat { agent_id: agent_id.into(), supported: true, loading: true, ..Default::default() });
         }
+        self.stop_dictation_if_away(Some(agent_id));
         self.inputs.drafts.address(Some(agent_id));
         self.refresh_chat();
         self.model.compose_focus += 1;
