@@ -30,6 +30,7 @@ impl Lantern {
     /// Opens Welcome on its first step, with fresh hook states (Swift `.task { hooks.refresh() }`).
     pub(super) fn show_welcome(&mut self) {
         if !self.windows.dialogs.welcome {
+            super::trace!("welcome: shown");
             self.view.welcome_step = 0;
             self.refresh_hooks();
             self.refresh_notifications();
@@ -38,6 +39,7 @@ impl Lantern {
     }
 
     pub(super) fn finish_welcome(&mut self) {
+        super::trace!("welcome: finished on step {}", self.view.welcome_step + 1);
         self.windows.dialogs.welcome = false;
         self.model.prefs.welcomed = true;
         self.save_prefs();
