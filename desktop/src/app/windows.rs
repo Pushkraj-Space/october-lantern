@@ -1,10 +1,12 @@
 //! The pill (root viewport) and the panel beside it (a second native window), positioned and
 //! behaving like the Mac's (CONTRACT §6). Geometry is `shell`'s; platform roles are `os::shell`'s.
 use super::Lantern;
+use crate::os::Event;
 use crate::os::shell::{self as platform, PANEL_TITLE, PILL_TITLE, Role};
 use crate::shell::{self, Hover, PILL_COLLAPSED, PILL_EXPANDED};
 use crate::ui::{self, Ctx, Env};
 use eframe::egui::{self, Pos2, Rect, Vec2, ViewportBuilder, ViewportCommand, ViewportId, vec2};
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 /// Swift: the panel fades in over .12 s; a snap animates over .18 s.
@@ -45,6 +47,13 @@ pub struct Windows {
     pub native_dialog: bool,
     clipboard: Option<String>,
     quitting: bool,
+    /// A screen capture waiting for Lantern's windows to be cleared, and how many frames they
+    /// have been cleared for.
+    capture: Option<Box<dyn FnOnce(Sender<Event>) + Send>>,
+    cleared_frames: u32,
+    capturing: bool,
+    /// The pill's help text under the pointer, and since when (shown after a moment).
+    tip: Option<(String, Rect, Vec2, f64)>,
 }
 
 impl Windows {
@@ -59,6 +68,21 @@ impl Windows {
     }
     pub fn quit(&mut self) {
         self.quitting = true;
+    }
+    /// Runs `start` once Lantern's windows have drawn nothing for a couple of frames, so the capture
+    /// leaves them out (the Mac excludes its own windows; portals and GDI can't). The windows stay
+    /// mapped (unmapping would reset their window-manager state) and draw again on `capture_done`.
+    pub fn hide_for_capture(&mut self, start: impl FnOnce(Sender<Event>) + Send + 'static) {
+        self.capture = Some(Box::new(start));
+        self.cleared_frames = 0;
+        self.capturing = true;
+    }
+    pub fn capture_done(&mut self) {
+        self.capturing = false;
+        self.capture = None;
+    }
+    fn cleared(&self) -> bool {
+        self.capturing
     }
 }
 
@@ -177,6 +201,18 @@ impl Lantern {
             w.pill_at = Some(at);
         }
 
+        // A capture waiting for Lantern's windows to clear: draw nothing, then start it.
+        if w.cleared() {
+            w.cleared_frames += 1;
+            if w.cleared_frames >= 3
+                && let Some(start) = w.capture.take()
+            {
+                start(self.tx.clone());
+            }
+            ctx.request_repaint();
+            self.panel(&ctx, work, scale);
+            return;
+        }
         // The pill.
         let assets = self.assets.as_ref().expect("assets load before the first frame");
         let input = egui::CentralPanel::default()
@@ -184,6 +220,11 @@ impl Lantern {
             .show(ui, |ui| shell::pill::show(ui, &self.model, assets, expanded, &mut self.actions))
             .inner;
         let w = &mut self.windows;
+        w.tip = match (input.help, w.tip.take()) {
+            (Some((text, rect, size)), Some((old, _, _, since))) if old == text => Some((text, rect, size, since)),
+            (Some((text, rect, size)), _) => Some((text, rect, size, now)),
+            (None, _) => None,
+        };
         // Dragging by the lantern moves the pill (and the panel with it); letting go snaps it to
         // the nearer edge. Positions come from the window, never the global pointer (CONTRACT §8.2).
         let pointer = ctx.input(|input| input.pointer.interact_pos()).zip(outer).map(|(local, rect)| rect.min + local.to_vec2());
@@ -208,10 +249,53 @@ impl Lantern {
             self.model.prefs.edge = edge;
             self.model.prefs.pill_top = top;
             w.snap = Some(Snap { from: dropped.min, started: Instant::now() });
-            // TODO(apollo): persist prefs.
+            self.save_prefs();
         }
 
+        self.tip(&ctx, size);
         self.panel(&ctx, work, scale);
+    }
+
+    /// The pill's help text, beside the pill, after half a second (a native tooltip on the Mac).
+    fn tip(&mut self, ctx: &egui::Context, pill_size: Vec2) {
+        let w = &self.windows;
+        let now = ctx.input(|input| input.time);
+        let Some((text, rect, text_size, since)) = w.tip.clone().filter(|tip| now - tip.3 >= 0.5 && w.drag.is_none()) else {
+            if w.tip.is_some() {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            return;
+        };
+        let _ = since;
+        let size = text_size + vec2(16.0, 10.0);
+        let pill = w.pill_at.unwrap_or_default();
+        let x = match self.model.prefs.edge {
+            crate::model::Edge::Right => pill.x - size.x - 8.0,
+            crate::model::Edge::Left => pill.x + pill_size.x + 8.0,
+        };
+        let at = egui::pos2(x, pill.y + rect.center().y - size.y / 2.0);
+        #[allow(unused_mut)]
+        let mut builder = ViewportBuilder::default()
+            .with_title("October Lantern tip")
+            .with_inner_size(size)
+            .with_position(at)
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(false)
+            .with_always_on_top()
+            .with_taskbar(false)
+            .with_active(false)
+            .with_mouse_passthrough(true);
+        #[cfg(target_os = "linux")]
+        {
+            builder = builder.with_window_type(egui::X11WindowType::Tooltip);
+        }
+        ctx.show_viewport_immediate(ViewportId::from_hash_of("lantern-tip"), builder, |ui, _| {
+            let rect = ui.max_rect();
+            ui.painter().rect_filled(rect, 6.0, ui::theme::black(0.85));
+            ui.painter().rect_stroke(rect.shrink(0.5), 6.0, egui::Stroke::new(1.0, ui::theme::STROKE), egui::StrokeKind::Inside);
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, &text, shell::pill::help_font(), ui::theme::white(0.9));
+        });
     }
 
     /// The panel window beside the pill, while a panel is open.
@@ -251,8 +335,12 @@ impl Lantern {
         let assets = self.assets.as_ref().expect("assets load before the first frame");
         let mut measured = None;
         let mut focused = None;
+        let cleared = self.windows.cleared();
         ctx.show_viewport_immediate(ViewportId::from_hash_of("lantern-panel"), builder, |ui, _class| {
             ctx_commands(ui.ctx(), frame);
+            if cleared {
+                return; // a screen capture is waiting for Lantern's windows to clear
+            }
             let fade = (opened.elapsed().as_secs_f32() / FADE).min(1.0);
             ui.set_opacity(fade);
             // The panel surface draws its own glass and handles Esc (ui::render_panel).

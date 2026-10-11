@@ -146,6 +146,10 @@ pub fn set_main_window(hwnd: isize) {
 /// The display under the pointer, as a PNG in Lantern's screenshots folder. Lantern's window is
 /// excluded from capture just for this moment (Windows 10 2004 and later), so screen sharing and
 /// other apps still see it the rest of the time.
+/// The display under the pointer, without a chooser (Windows has none to show).
+pub fn capture_screen() -> Result<PathBuf> {
+    screenshot()
+}
 pub fn screenshot() -> Result<PathBuf> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
     let window = MAIN_WINDOW.load(std::sync::atomic::Ordering::Relaxed) as HWND;

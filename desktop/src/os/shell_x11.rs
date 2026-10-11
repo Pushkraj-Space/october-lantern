@@ -121,6 +121,52 @@ pub fn adopt(title: &str, role: Role) -> bool {
     x.conn.flush().is_ok()
 }
 
+/// Apps where a Task makes no sense (a normal session instead), by WM_CLASS.
+const TERMINALS: [&str; 14] = [
+    "gnome-terminal",
+    "org.gnome.ptyxis",
+    "org.gnome.console",
+    "kgx",
+    "konsole",
+    "kitty",
+    "alacritty",
+    "org.wezfurlong.wezterm",
+    "wezterm",
+    "xterm",
+    "tilix",
+    "terminator",
+    "com.mitchellh.ghostty",
+    "foot",
+];
+
+/// The app in front, when it's an X11 app (CONTRACT §8.5: Wayland-native apps can't be read).
+/// Lantern's own windows never take focus, so this is still the person's app when they click the pill.
+pub fn foreground_app() -> Option<crate::model::AppContext> {
+    let mut x = X::connect()?;
+    let root = x.root;
+    let window = *x.cardinals(root, "_NET_ACTIVE_WINDOW", AtomEnum::WINDOW).first()?;
+    if window == 0 || x.cardinals(window, "_NET_WM_PID", AtomEnum::CARDINAL).first() == Some(&std::process::id()) {
+        return None;
+    }
+    let class = x.conn.get_property(false, window, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 256).ok()?.reply().ok()?;
+    let mut parts = class.value.split(|&byte| byte == 0).map(|part| String::from_utf8_lossy(part).into_owned());
+    let (instance, class) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default());
+    if class.is_empty() && instance.is_empty() {
+        return None; // XWayland's stand-in while a Wayland-native app has focus
+    }
+    let id = if instance.is_empty() { class.clone() } else { instance };
+    let is_terminal = TERMINALS.iter().any(|terminal| terminal.eq_ignore_ascii_case(&id) || terminal.eq_ignore_ascii_case(&class));
+    let title = x.title(window);
+    Some(crate::model::AppContext {
+        name: if class.is_empty() { id.clone() } else { class },
+        id,
+        is_terminal,
+        window: (!title.is_empty()).then_some(title),
+        pid: x.cardinals(window, "_NET_WM_PID", AtomEnum::CARDINAL).first().map(|&pid| pid as i64),
+        ..Default::default()
+    })
+}
+
 /// The global pointer isn't reliable under XWayland (stale over Wayland-native windows), so hover
 /// comes from Lantern's own windows (CONTRACT §8).
 pub fn cursor_position() -> Option<eframe::egui::Pos2> {

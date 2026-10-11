@@ -350,6 +350,25 @@ pub struct AppContext {
     pub pid: Option<i64>,
 }
 
+impl AppContext {
+    /// The text added to the agent's first message for a Task (Swift `AppContext.Target.summary`),
+    /// naming this computer the way the platform does.
+    pub fn summary(&self, platform: Platform) -> String {
+        let computer = match platform {
+            Platform::Windows => "this Windows PC",
+            Platform::Linux => "this Linux computer",
+        };
+        let mut lines = vec![format!("I'm working in {} on {computer}.", self.name)];
+        if let Some(window) = self.window.as_deref().filter(|window| !window.is_empty()) {
+            lines.push(format!("Its front window is \"{window}\"."));
+        }
+        if let Some(document) = &self.document {
+            lines.push(format!("The open document is {}.", document.display()));
+        }
+        lines.join(" ")
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum Capture {
@@ -596,6 +615,20 @@ impl Default for Prefs {
     }
 }
 
+/// Folders to offer for a new session (Swift `recentFolders`): ones you've used, then where agents
+/// are running (in rank order); no repeats, never the home folder, at most 8.
+pub fn offered_folders(prefs: &Prefs, agents: &[Agent], home: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    prefs
+        .recent_folders
+        .iter()
+        .cloned()
+        .chain(agents.iter().filter_map(|agent| agent.cwd.clone()))
+        .filter(|folder| folder != home && seen.insert(folder.clone()))
+        .take(8)
+        .collect()
+}
+
 impl Prefs {
     /// Whether a harness counts in Waiting, the badge and notifications.
     pub fn counts(&self, kind: &AgentKind) -> bool {
@@ -705,6 +738,31 @@ mod tests {
         assert_eq!(agent.state, AgentState::Unknown);
         assert_eq!(agent.kind.display_name(), "Newharness");
         assert_eq!(AgentState::Unknown.label(), "Running");
+    }
+
+    #[test]
+    fn task_context_names_the_app_window_and_document_per_platform() {
+        let context = AppContext {
+            name: "DaVinci Resolve".into(),
+            window: Some("video-3".into()),
+            document: Some("/home/me/video-3.drp".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            context.summary(Platform::Linux),
+            "I'm working in DaVinci Resolve on this Linux computer. Its front window is \"video-3\". The open document is /home/me/video-3.drp."
+        );
+        assert!(context.summary(Platform::Windows).contains("on this Windows PC."));
+    }
+
+    #[test]
+    fn offered_folders_put_used_ones_first_and_skip_home_and_repeats() {
+        let prefs = Prefs { recent_folders: vec!["/p/a".into(), "/home/me".into()], ..Default::default() };
+        let agent = |cwd: &str| Agent { cwd: Some(cwd.into()), ..Default::default() };
+        let agents: Vec<Agent> = ["/p/b", "/p/a", "/home/me"].into_iter().chain((0..10).map(|_| "/p/c")).map(agent).collect();
+        assert_eq!(offered_folders(&prefs, &agents, "/home/me"), ["/p/a", "/p/b", "/p/c"]);
+        let many: Vec<Agent> = (0..12).map(|n| agent(&format!("/p/{n}"))).collect();
+        assert_eq!(offered_folders(&Prefs::default(), &many, "/home/me").len(), 8);
     }
 
     #[test]

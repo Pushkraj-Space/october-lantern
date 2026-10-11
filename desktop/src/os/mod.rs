@@ -14,6 +14,7 @@ mod windows;
 #[cfg(windows)]
 pub use windows::*;
 pub mod shell;
+pub use shell::foreground_app;
 #[cfg(windows)]
 mod shell_win;
 #[cfg(target_os = "linux")]

@@ -38,6 +38,14 @@ impl Lantern {
             "harness" => {
                 if let Ok(harness) = serde_json::from_value::<HarnessStatus>(event.clone()) {
                     self.model.harness = Some(harness);
+                    self.harness_changed();
+                }
+            }
+            "launchResult" => {
+                if let Some(Pending::Launch) = text(&event, "requestId").and_then(|id| self.pending.remove(&id)) {
+                    // A launch that worked can still carry a warning (e.g. it started without October Bus).
+                    let message = text(&event, "message").or_else(|| text(&event, "warning"));
+                    self.launch_result(event["ok"] == true, message, text(&event, "session"));
                 }
             }
             "models" => {
@@ -69,6 +77,8 @@ impl Lantern {
         self.inputs.drafts.prune(&live);
         self.model.agents = agents;
         self.model.inbox = self.turns.inbox(&self.model.agents, &self.model.prefs);
+        self.refresh_folders();
+        self.open_launched();
         // Keep an open conversation current; close it when its agent is gone.
         if let Some(chat) = &self.model.chat {
             if live.contains(&chat.agent_id) {

@@ -30,8 +30,41 @@ impl Lantern {
             UiAction::DismissTurns { turn_keys } => {
                 self.turns.dismiss(&turn_keys, &self.model.agents);
                 self.model.inbox = self.turns.inbox(&self.model.agents, &self.model.prefs);
+                self.save_prefs();
             }
             UiAction::AnswerPermission { agent_id, prompt_id, allow } => self.answer_permission(&agent_id, &prompt_id, allow),
+            UiAction::StartNewSession => self.start_new_session(),
+            UiAction::ChooseSessionAgent { kind } => self.choose_session_agent(kind),
+            UiAction::ChooseSessionModel { kind, model } => {
+                if self.inputs.new_session.kind.as_ref() == Some(&kind) {
+                    self.inputs.new_session.model = model;
+                }
+            }
+            UiAction::ChooseFolder => {
+                // Losing focus to the picker doesn't close the panel (CONTRACT §6).
+                self.windows.native_dialog = true;
+                crate::os::task(self.tx.clone(), crate::os::folder, crate::os::Event::Folder);
+            }
+            UiAction::SetSessionScreenshot(on) => self.set_session_screenshot(on),
+            UiAction::RetakeSessionScreenshot => {
+                if self.inputs.new_session.screenshot {
+                    self.capture_screen();
+                }
+            }
+            UiAction::SetOpenInTerminal(terminal) => {
+                self.inputs.new_session.open_in_terminal = terminal;
+                self.model.prefs.open_in_terminal = terminal;
+                self.save_prefs();
+            }
+            UiAction::GetAgent { kind } => {
+                if let Some(url) = kind.website() {
+                    self.open_url(url);
+                }
+            }
+            UiAction::Launch(request) => self.launch(*request),
+            UiAction::CloseLaunchPreview => self.close_preview(),
+            UiAction::RetryPreviewInTerminal => self.retry_preview_in_terminal(),
+            UiAction::OpenUrl(url) => self.open_url(&url),
             UiAction::Copy(text) => self.windows.copy(text),
             UiAction::Quit => self.windows.quit(),
             // TODO(apollo): the remaining actions land with their surfaces (new session, assistant,
@@ -52,6 +85,7 @@ impl Lantern {
         self.close_chat();
         if old == Some(PanelMode::Inbox) && self.turns.mark_seen(&self.model.agents, &self.model.prefs) {
             self.model.inbox = self.turns.inbox(&self.model.agents, &self.model.prefs);
+            self.save_prefs();
         }
     }
 
@@ -71,8 +105,12 @@ impl Lantern {
         self.model.compose_focus += 1;
     }
 
+    /// Leaving a conversation also ends a starting session's preview (Swift `closeChat`). Launches
+    /// set the panel before the preview, so this never ends the preview they just showed (§9.1).
     pub(super) fn close_chat(&mut self) {
-        // TODO(apollo): end the launch preview here, with the ordering fix (CONTRACT §9.1).
+        if self.model.launch_preview.is_some() {
+            self.end_preview();
+        }
         if let Some(old) = self.history_request.take() {
             self.pending.remove(&old);
         }
@@ -104,6 +142,14 @@ impl Lantern {
         let key = if allow { "1" } else { "Escape" };
         if let Some(id) = self.request(json!({"type": "keys", "agentId": agent_id, "keys": [key], "promptId": prompt_id})) {
             self.pending.insert(id, Pending::Keys { agent_id: agent_id.into() });
+        }
+    }
+}
+
+impl Lantern {
+    fn open_url(&mut self, url: &str) {
+        if let Err(error) = crate::os::open(url) {
+            self.show(format!("Couldn't open {url}: {error:#}"));
         }
     }
 }

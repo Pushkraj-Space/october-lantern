@@ -6,7 +6,7 @@ use crate::model::{EngineHealth, Model, PanelMode};
 use crate::ui::components::paint_glass;
 use crate::ui::icons::{Icon, paint_icon};
 use crate::ui::{Assets, UiAction, theme};
-use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 
 const PAD: f32 = 6.0;
 const LANTERN: f32 = 38.0;
@@ -20,6 +20,14 @@ pub struct PillInput {
     pub drag_started: bool,
     pub dragging: bool,
     pub drag_stopped: bool,
+    /// What's under the pointer: its help text, its rect in the pill, and the text's size. A 50pt
+    /// window would clip an egui tooltip, so the shell shows it in a window of its own.
+    pub help: Option<(String, Rect, Vec2)>,
+}
+
+/// Help text style (the shell's tooltip window uses the same).
+pub fn help_font() -> egui::FontId {
+    theme::font(12.0, theme::Weight::Regular)
 }
 
 /// Draws the pill filling `ui`'s window and reports actions. `expanded` decides whether the four
@@ -41,8 +49,16 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
         (0, None) => "Ask Lantern".to_string(),
         (n, None) => format!("Ask Lantern · {n} new, waiting on you"),
     };
-    let input = PillInput { drag_started: response.drag_started(), dragging: response.dragged(), drag_stopped: response.drag_stopped() };
-    response.on_hover_text(tooltip);
+    let measure = |text: &str| painter.layout_no_wrap(text.to_string(), help_font(), Color32::WHITE).size();
+    let mut input = PillInput {
+        drag_started: response.drag_started(),
+        dragging: response.dragged(),
+        drag_stopped: response.drag_stopped(),
+        help: None,
+    };
+    if response.hovered() && !response.dragged() {
+        input.help = Some((tooltip.clone(), lantern, measure(&tooltip)));
+    }
 
     if expanded {
         let mut y = lantern.max.y + 8.0;
@@ -75,7 +91,9 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
                     _ => UiAction::StartPointAsk,
                 });
             }
-            response.on_hover_text(help);
+            if response.hovered() {
+                input.help = Some((help.to_string(), slot, measure(help)));
+            }
             y += ICON + 6.0;
         }
     }

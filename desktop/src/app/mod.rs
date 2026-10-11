@@ -23,15 +23,18 @@ pub(crate) fn uptime() -> f64 {
 mod apply;
 mod engine;
 pub mod fixture;
+mod session;
 mod windows;
 
-use crate::model::{Inputs, Model, drafts::Ticket, inbox::Turns};
+use crate::model::{Inputs, Model, Prefs, drafts::Ticket, inbox::Turns};
+use crate::os::Event;
 use crate::sidecar::Sidecar;
 use crate::ui::{Assets, UiAction, UiState};
 use anyhow::Result;
 use eframe::egui;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 /// A request the engine hasn't answered yet.
@@ -48,6 +51,7 @@ enum Pending {
     History {
         agent_id: String,
     },
+    Launch,
 }
 
 pub struct Lantern {
@@ -66,19 +70,32 @@ pub struct Lantern {
     history_at: Instant,
     toast_until: Option<Instant>,
     actions: Vec<UiAction>,
+    launching: session::Launching,
+    /// An action to run once the engine has said which agents are installed (`--new-session`, the
+    /// tray, a hotkey).
+    on_ready: Option<UiAction>,
+    /// Results of work done off the frame loop (captures, the folder picker).
+    tx: Sender<Event>,
+    events: Receiver<Event>,
     started: Instant,
 }
 
 impl Lantern {
-    fn new(engine: Sidecar) -> Self {
-        let mut model = Model { caps: capabilities(), ..Default::default() };
+    /// `ctx`: woken when background work finishes (none in tests).
+    fn new(engine: Sidecar, ctx: Option<egui::Context>) -> Self {
+        let (prefs, turns) = load_state();
+        let mut model = Model { caps: capabilities(), prefs, ..Default::default() };
         model.system.version = env!("CARGO_PKG_VERSION").into();
+        let (tx, events) = match ctx {
+            Some(ctx) => crate::os::event_pump(move |_| ctx.request_repaint()),
+            None => std::sync::mpsc::channel(),
+        };
         Self {
             engine,
             connected: false,
             model,
             inputs: Inputs::default(),
-            turns: Turns::default(),
+            turns,
             view: UiState::default(),
             assets: None,
             windows: windows::Windows::default(),
@@ -88,7 +105,42 @@ impl Lantern {
             history_at: Instant::now(),
             toast_until: None,
             actions: Vec::new(),
+            launching: session::Launching::default(),
+            on_ready: None,
+            tx,
+            events,
             started: Instant::now(),
+        }
+    }
+
+    /// Saves preferences and Waiting's seen/dismissed turns (never from tests).
+    fn save_prefs(&self) {
+        if cfg!(test) {
+            return;
+        }
+        let state = serde_json::json!({"prefs": self.model.prefs, "turns": self.turns});
+        if let Err(error) = crate::settings::private_write(&state_path(), state.to_string().as_bytes()) {
+            eprintln!("Lantern: couldn't save preferences: {error:#}");
+        }
+    }
+
+    /// Results of background work.
+    fn integration(&mut self, event: Event) {
+        match event {
+            Event::Screenshot { owner, generation, result } if owner == "__new" => {
+                self.windows.capture_done();
+                self.screenshot_captured(generation, result);
+            }
+            Event::Folder(result) => {
+                self.windows.native_dialog = false;
+                match result {
+                    Ok(path) => self.inputs.new_session.folder = Some(path.to_string_lossy().into_owned()),
+                    Err(error) if !error.contains("cancelled") => self.show(error),
+                    Err(_) => {}
+                }
+            }
+            Event::Status(text) => self.show(text),
+            _ => {}
         }
     }
 
@@ -131,6 +183,7 @@ impl Lantern {
         if self.model.chat.is_some() && self.history_at.elapsed() >= Duration::from_secs(2) {
             self.refresh_chat();
         }
+        self.launch_tick();
     }
 }
 
@@ -169,7 +222,15 @@ impl eframe::App for Lantern {
         for event in self.engine.take_latest() {
             self.engine_event(event);
         }
+        while let Ok(event) = self.events.try_recv() {
+            self.integration(event);
+        }
         self.tick();
+        if self.model.new_session.installed.is_some()
+            && let Some(action) = self.on_ready.take()
+        {
+            self.apply(action);
+        }
         self.assets.get_or_insert_with(|| Assets::load(&ctx));
         self.frame(ui);
         for action in std::mem::take(&mut self.actions) {
@@ -181,7 +242,8 @@ impl eframe::App for Lantern {
 }
 
 /// `--shell`: the Mac-parity app (pill + panel). The legacy window stays the default until it's done.
-pub fn run(terminal: &str) -> Result<()> {
+/// `start`: what to open once the engine is ready (`--new-session`).
+pub fn run(terminal: &str, start: Option<UiAction>) -> Result<()> {
     let engine = Sidecar::with_terminal(terminal)?;
     let options = windows::options();
     eframe::run_native(
@@ -189,8 +251,24 @@ pub fn run(terminal: &str) -> Result<()> {
         options,
         Box::new(move |cc| {
             crate::ui::theme::install(&cc.egui_ctx);
-            Ok(Box::new(Lantern::new(engine)))
+            let mut lantern = Lantern::new(engine, Some(cc.egui_ctx.clone()));
+            lantern.on_ready = start;
+            Ok(Box::new(lantern))
         }),
     )
     .map_err(|error| anyhow::anyhow!("{error}"))
+}
+
+/// Preferences and Waiting's seen/dismissed turns, kept across launches.
+fn state_path() -> std::path::PathBuf {
+    crate::settings::config_dir().join("lantern-state.json")
+}
+
+fn load_state() -> (Prefs, Turns) {
+    if cfg!(test) {
+        return Default::default();
+    }
+    let Ok(text) = std::fs::read_to_string(state_path()) else { return Default::default() };
+    let value: Value = serde_json::from_str(&text).unwrap_or_default();
+    (serde_json::from_value(value["prefs"].clone()).unwrap_or_default(), serde_json::from_value(value["turns"].clone()).unwrap_or_default())
 }

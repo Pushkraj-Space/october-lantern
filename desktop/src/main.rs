@@ -968,7 +968,8 @@ fn main() -> anyhow::Result<()> {
     }
     if args.iter().any(|arg| arg == "--shell") {
         let settings = Settings::load().unwrap_or_default();
-        return app::run(&settings.terminal);
+        let start = args.iter().any(|arg| arg == "--new-session").then_some(ui::UiAction::StartNewSession);
+        return app::run(&settings.terminal, start);
     }
     if args.iter().any(|arg| arg == "--help") {
         println!(

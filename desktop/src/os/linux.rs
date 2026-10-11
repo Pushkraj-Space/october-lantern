@@ -133,10 +133,18 @@ fn request(connection: &Connection, token: &str, call: impl FnOnce() -> Result<O
     }
 }
 pub fn screenshot() -> Result<PathBuf> {
+    portal_screenshot(true)
+}
+/// The whole screen, without the desktop's chooser (the portal asks once to allow it), for New
+/// Session's "Include a screenshot of my screen" and Point & Ask's frozen frame.
+pub fn capture_screen() -> Result<PathBuf> {
+    portal_screenshot(false)
+}
+fn portal_screenshot(interactive: bool) -> Result<PathBuf> {
     let connection = connection()?;
     let proxy = portal(&connection, "org.freedesktop.portal.Screenshot")?;
     let id = token();
-    let options = Options::from([("handle_token".into(), text(&id)), ("interactive".into(), true.into())]);
+    let options = Options::from([("handle_token".into(), text(&id)), ("interactive".into(), interactive.into())]);
     let mut result = request(&connection, &id, || Ok(proxy.call("Screenshot", &("", options))?))?;
     let uri = String::try_from(result.remove("uri").context("screenshot URI missing")?)?;
     let source = url::Url::parse(&uri)?.to_file_path().map_err(|_| anyhow::anyhow!("screenshot is not a local file"))?;
