@@ -333,7 +333,6 @@ struct AskBox: View {
 /// Lantern's home (click the lantern): Ask Lantern. What's waiting is on the stack button.
 struct AssistantHome: View {
     static let ideas: [(symbol: String, text: String)] = [
-        ("square.stack.3d.up", "What are my agents doing?"),
         ("wifi", "Fix the Wi-Fi."),
         ("video", "Join the call."),
         ("photo", "Find that photo."),
