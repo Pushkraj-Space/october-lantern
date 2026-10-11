@@ -126,7 +126,9 @@ final class Assistant: ObservableObject {
         guard let p = pending, let model else { return }
         pending = nil
         // Waits for October Harness to finish installing when that's the agent.
-        _ = model.launchTask(prompt: p.prompt, agent: p.kind, folder: p.folder, background: false)
+        // In the background (tmux) when possible: the chat opens in Lantern, and Open shows the
+        // terminal. Without tmux, a Terminal window.
+        _ = model.launchTask(prompt: p.prompt, agent: p.kind, folder: p.folder, background: model.tmuxAvailable)
         if let i = turns.firstIndex(where: { $0.id == turn }) {
             turns[i].started = "Started \(p.kind.displayName) in \(URL(fileURLWithPath: p.folder).lastPathComponent)"
         }
