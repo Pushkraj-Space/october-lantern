@@ -37,6 +37,9 @@ struct NewSessionView: View {
     @State private var folder: String?
     @State private var prompt = ""
     @State private var background = false
+    /// "Terminal window" chosen last time; otherwise sessions run in the background (tmux) and
+    /// open as a chat in Lantern, with Open to see the terminal.
+    @AppStorage("openInTerminal") private var openInTerminal = false
     /// nil: the agent's own default model.
     @State private var chosenModel: String?
     @State private var searchingModels = false
@@ -64,7 +67,15 @@ struct NewSessionView: View {
             screenshotOn = task || prefs.screenshotNewSessions
             if screenshotOn { await shot.capture() }
         }
-        .onAppear { kindChanged() }
+        .onAppear {
+            background = model.tmuxAvailable && !openInTerminal
+            if let fill = model.takeNewSessionPrefill() {
+                prompt = fill.prompt
+                if let f = fill.folder { folder = f }
+                taskDismissed = true
+            }
+            kindChanged()
+        }
         .onChange(of: selectedKind) { kindChanged() }
         .onChange(of: model.launching) { was, now in
             // A start that succeeded moves to the Agents list; one that failed leaves us here.
@@ -90,12 +101,12 @@ struct NewSessionView: View {
             }
             section("Open in") {
                 HStack(spacing: 8) {
-                    Choice(title: "Terminal window", symbol: "macwindow", selected: !background) { background = false }
-                    Choice(title: "Background", symbol: "moon", selected: background, disabled: !model.tmuxAvailable) { background = true }
+                    Choice(title: "Terminal window", symbol: "macwindow", selected: !background) { background = false; openInTerminal = true }
+                    Choice(title: "In Lantern", symbol: "bubble.left.and.text.bubble.right", selected: background, disabled: !model.tmuxAvailable) { background = true; openInTerminal = false }
                 }
                 .help(model.tmuxAvailable
-                      ? "Lantern can reply directly to sessions it starts. Background sessions open in Terminal when you click Open."
-                      : "Install tmux (brew install tmux) so Lantern can reply directly and run sessions in the background.")
+                      ? "In Lantern: the session runs in the background and its chat opens here; click Open to see it in Terminal."
+                      : "Install tmux (brew install tmux) to run sessions in Lantern instead of a Terminal window.")
             }
         }
     }
@@ -637,14 +648,12 @@ struct OctoberView: View {
                 OctoberLogo(size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("October").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                    Text("Lantern works on its own. Connecting to October adds more.")
+                    Text("Optional. Sign in for Ask and Point & Ask answers; connect October Desktop to see its agents here.")
                         .font(.system(size: 11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
             }
             AccountCard()
-            DesktopCard(model: model)
-            TeamCard()
-            PhoneCard(signedIn: account.signedIn, planAllowsPhone: account.plan?.features?.mobile?.enabled)
+            DesktopCard(model: model, compact: true)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)

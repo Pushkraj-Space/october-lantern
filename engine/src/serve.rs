@@ -58,6 +58,19 @@ enum Request {
     /// the Bus doesn't wait for it.
     #[serde(rename = "bus.prepare")]
     BusPrepare,
+    /// Install Lantern's October Harness now if `october` isn't on PATH and it isn't here yet
+    /// (answered with `harness`, once it's ready or has failed).
+    #[serde(rename = "harness.prepare", rename_all = "camelCase")]
+    HarnessPrepare {
+        request_id: Option<String>,
+    },
+    /// The October sign-in for October launches: the current access token and when it expires
+    /// (unix seconds), or no token when signed out. Kept in memory only.
+    #[serde(rename = "october.session", rename_all = "camelCase")]
+    OctoberSession {
+        access_token: Option<String>,
+        expires_at: Option<u64>,
+    },
     /// Rebuild the toolkit list now (answered with `toolkit`).
     #[serde(rename = "toolkit.refresh")]
     ToolkitRefresh,
@@ -202,7 +215,7 @@ pub fn run() -> Result<()> {
     emit(&json!({"type": "hello", "protocol": 3, "version": env!("CARGO_PKG_VERSION")}));
     crate::hooks::refresh_hook_binary();
     // Checking installed agents runs a login shell, so do it off the main loop.
-    std::thread::spawn(|| emit(&json!({"type": "installed", "installed": launch::installed()})));
+    std::thread::spawn(emit_installed);
     // The toolkit list is kept, not rebuilt before each start: refresh it now if it's old.
     std::thread::spawn(crate::toolkit::refresh_if_stale);
 
@@ -342,6 +355,32 @@ pub fn run() -> Result<()> {
                         Err(e) => emit(&json!({"type": "bus", "ready": false, "message": format!("{e:#}")})),
                     });
                 }
+                Ok(Request::HarnessPrepare { request_id }) => {
+                    std::thread::spawn(move || {
+                        let now = harness_json(request_id.as_deref());
+                        if now["status"] == "ready" {
+                            return emit(&now);
+                        }
+                        let mut installing = now;
+                        installing["status"] = json!("installing");
+                        if let Some(m) = installing.as_object_mut() {
+                            m.remove("message");
+                        }
+                        emit(&installing);
+                        crate::harness::prepare(move |result| {
+                            let mut v = harness_json(request_id.as_deref());
+                            if let Err(e) = result {
+                                v["status"] = json!("failed");
+                                v["message"] = json!(format!("{e:#}"));
+                            }
+                            emit(&v);
+                            emit_installed();
+                        });
+                    });
+                }
+                Ok(Request::OctoberSession { access_token, expires_at }) => {
+                    crate::harness::set_session(access_token.zip(expires_at));
+                }
                 Ok(Request::ToolkitRefresh) => {
                     std::thread::spawn(|| match crate::toolkit::refresh() {
                         Ok(path) => emit(&json!({"type": "toolkit", "ok": true, "path": path})),
@@ -445,6 +484,23 @@ pub fn run() -> Result<()> {
             Err(RecvTimeoutError::Timeout) => {}
         }
     }
+}
+
+/// The `installed` event: agents that can be started, tmux, and October Harness's status.
+fn emit_installed() {
+    let installed = launch::installed();
+    let on_path = launch::on_path().kinds.contains(&Kind::October);
+    emit(&json!({"type": "installed", "installed": installed, "harness": crate::harness::status(on_path)}));
+}
+
+/// The `harness` event, for `harness.prepare`.
+fn harness_json(request_id: Option<&str>) -> Value {
+    let mut v = crate::harness::status(launch::on_path().kinds.contains(&Kind::October));
+    v["type"] = json!("harness");
+    if let Some(id) = request_id {
+        v["requestId"] = json!(id);
+    }
+    v
 }
 
 /// The agent, if Lantern can type into it at all.

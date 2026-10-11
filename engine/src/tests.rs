@@ -905,3 +905,113 @@ fn october_agents_match_their_node() {
     merge(&mut agents, &single);
     assert_eq!(agents[0].route, Route::October { canvas_id: "canvas-B".into(), node_id: "solo".into() });
 }
+
+#[test]
+fn harness_pin_is_read_and_checked() {
+    use crate::harness::{parse_node_version, parse_pin, pin};
+    let shipped = pin().expect("engine/harness.json must parse for this Mac");
+    assert_eq!(shipped.package, "@october-dev/october");
+    assert!(shipped.node_minimum >= (22, 19, 0));
+    assert!(parse_node_version(&shipped.node_version).unwrap() >= shipped.node_minimum, "the pinned Node.js must satisfy the harness");
+    let json = include_str!("../harness.json");
+    for (arch, node) in [("arm64", "arm64"), ("x86_64", "x64")] {
+        let p = parse_pin(json, arch).unwrap();
+        assert!(p.node_url.ends_with(&format!("-darwin-{node}.tar.gz")), "{}", p.node_url);
+        assert_eq!(p.node_sha256.len(), 64);
+    }
+    // Anything off is no pin at all.
+    assert!(parse_pin(&json.replace("https://nodejs.org/dist/", "http://example.com/"), "arm64").is_none());
+    assert!(parse_pin(&json.replace("bed7eea5", "zzzzzzzz"), "arm64").is_none());
+    assert!(parse_pin(json, "riscv").is_none());
+    assert_eq!(parse_node_version("v22.19.0\n"), Some((22, 19, 0)));
+    assert_eq!(parse_node_version("24.21"), Some((24, 21, 0)));
+    assert!(parse_node_version("v22.18.9").unwrap() < (22, 19, 0));
+    assert_eq!(parse_node_version("node"), None);
+    // Other platforms' optional packages are pruned after npm install.
+    use crate::harness::allows;
+    use serde_json::json;
+    assert!(allows(&json!(null), "darwin"));
+    assert!(allows(&json!(["darwin"]), "darwin"));
+    assert!(!allows(&json!(["linux"]), "darwin"));
+    assert!(!allows(&json!(["!darwin"]), "darwin"));
+    assert!(allows(&json!(["!win32"]), "darwin"));
+    assert!(!allows(&json!(["x64"]), "arm64"));
+}
+
+#[test]
+fn bundled_october_runs_with_its_node_and_sign_in() {
+    use crate::harness::{Bundled, env_for};
+    use crate::launch::{LaunchEnv, agent_command_with, october_env};
+    use std::path::Path;
+    let bundled = Bundled {
+        bin: "/S/October Lantern/harness/1.0/node_modules/.bin/october".into(),
+        node_bin: "/S/October Lantern/runtime/node-v24.21.0-darwin-arm64/bin".into(),
+        version: "1.0".into(),
+    };
+    let session = env_for(Some(&("tok.en".to_string(), 2_000)), 1_000);
+    let extra = october_env(false, Some(&bundled), session.clone());
+    let cmd = agent_command_with(Kind::October, Path::new("/p"), Some("hi"), None, None, None, &extra);
+    // The command is single-quoted for `$SHELL -lic`; look inside it.
+    let inner = cmd.replace(r"'\''", "'");
+    assert!(inner.contains("PATH='/S/October Lantern/runtime/node-v24.21.0-darwin-arm64/bin':\"$PATH\" "), "{inner}");
+    assert!(inner.contains("exec '/S/October Lantern/harness/1.0/node_modules/.bin/october' -- 'hi'"), "{inner}");
+    for var in [
+        "OCTOBER_SUPABASE_URL=",
+        "OCTOBER_SUPABASE_ANON_KEY=",
+        "OCTOBER_SUPABASE_ACCESS_TOKEN='tok.en'",
+        "OCTOBER_SUPABASE_EXPIRES_AT='2000'",
+    ] {
+        assert!(inner.contains(var), "{var} missing: {inner}");
+    }
+    assert!(!inner.contains("REFRESH"), "the refresh token is never passed");
+    // With October Bus, the Bus wraps the bundled program and the environment still comes first.
+    let bus = crate::bus::Attach { wrap: vec!["'/bus'".into(), "agent".into(), "run".into(), "--".into()], ..Default::default() };
+    let wrapped = agent_command_with(Kind::October, Path::new("/p"), None, None, None, Some(&bus), &extra).replace(r"'\''", "'");
+    assert!(wrapped.contains("OCTOBER_SUPABASE_EXPIRES_AT='2000' exec '/bus' agent run -- '/S/October Lantern/harness/1.0/"), "{wrapped}");
+    // `october` on the user's PATH is used as it is, still signed in.
+    let own = october_env(true, Some(&bundled), session);
+    assert_eq!((own.program.as_deref(), own.path_prefix.as_deref()), (None, None));
+    let plain = agent_command_with(Kind::October, Path::new("/p"), None, None, None, None, &own);
+    assert!(plain.contains("exec october") && !plain.contains("PATH=") && plain.contains("OCTOBER_SUPABASE_ACCESS_TOKEN"), "{plain}");
+    // Signed out, or an expired token: no sign-in at all.
+    assert!(env_for(None, 1_000).is_empty());
+    assert!(env_for(Some(&("old".to_string(), 999)), 1_000).is_empty());
+    assert_eq!(LaunchEnv::default(), october_env(true, None, Vec::new()));
+}
+
+#[test]
+fn the_bundled_harness_counts_as_installed() {
+    use crate::harness::bundled_in;
+    use crate::launch::{Installed, with_bundled};
+    let shell = Installed { kinds: vec![Kind::Claude], tmux: true };
+    assert!(with_bundled(&shell, true).kinds.contains(&Kind::October));
+    assert!(!with_bundled(&shell, false).kinds.contains(&Kind::October));
+    let both = Installed { kinds: vec![Kind::October], tmux: false };
+    assert_eq!(with_bundled(&both, true).kinds, vec![Kind::October]);
+
+    // An install is complete only with its program and the Node.js it was installed with.
+    let root = temp_dir("harness");
+    assert!(bundled_in(&root).is_none());
+    let version = crate::harness::pin().unwrap().version;
+    let dir = root.join("harness").join(&version);
+    fs::create_dir_all(dir.join("node_modules/.bin")).unwrap();
+    fs::write(dir.join("node_modules/.bin/october"), "#!/usr/bin/env node\n").unwrap();
+    assert!(bundled_in(&root).is_none(), "no Node.js recorded yet");
+    let node_bin = root.join("node/bin");
+    fs::write(dir.join("node-bin"), node_bin.to_string_lossy().as_bytes()).unwrap();
+    assert!(bundled_in(&root).is_none(), "its Node.js is gone");
+    fs::create_dir_all(&node_bin).unwrap();
+    fs::write(node_bin.join("node"), "").unwrap();
+    let b = bundled_in(&root).unwrap();
+    assert_eq!(b.node_bin, node_bin);
+    assert!(b.bin.ends_with("node_modules/.bin/october"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Every agent Lantern starts is told where it is and to give full paths.
+#[test]
+fn launched_agents_are_asked_for_full_paths() {
+    let m = crate::launch::with_guidance("find my passport".into(), std::path::Path::new("/Users/me"));
+    assert!(m.starts_with("find my passport"));
+    assert!(m.contains("You're in /Users/me") && m.contains("full absolute path"));
+}

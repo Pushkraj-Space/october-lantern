@@ -62,12 +62,13 @@ The result is either wasted agent time (an agent sat idle for 20 minutes waiting
 
 1. **Finds every agent on your Mac, automatically.** You don't set anything up or start agents differently. If Claude Code, Codex, OpenCode, Pi, Gemini CLI or another supported agent is running in any terminal, Lantern sees it.
 2. **Knows which ones are waiting on you.** Lantern reads each agent's own session log to tell whether it's still working or has finished and is waiting for you, and shows what it last said. With the optional hooks, it also knows the moment Claude Code asks for permission, and which command it's asking about.
-3. **One place to look.** The lantern glows amber with a count when agents finish or ask you something. Click it to see **Waiting**: each agent, its project, how long it's been waiting and its last message.
+3. **One place to look.** The lantern glows amber with a count when agents finish or ask you something. The stack button shows **Waiting**: each agent, its project, how long it's been waiting and its last message.
 4. **Read the whole conversation.** Click any agent to open its chat: what you asked, what it answered, and a one-line summary of each command or tool it ran.
 5. **Answer without switching windows.** Type or dictate a reply and Lantern types it into the agent's own terminal tab: in **cmux**, **Terminal**, **iTerm2** and **tmux**. Right before typing, it checks that the terminal still belongs to the agent: the same process, still running the agent (not a shell it left behind), on that terminal, in the foreground. When it can't tell, it doesn't type. For permission prompts, **Allow** and **Deny** buttons answer right from Lantern; they only press a key if that prompt is still the one on screen.
 6. **Notifies you.** An optional macOS notification when an agent finishes or needs you, even when the lantern is out of sight. Clicking it opens that agent's conversation.
-7. **Starts new sessions.** Pick any installed agent, a folder and an optional first message, and Lantern opens it in a new Terminal window or runs it in the background.
-8. **Stays out of your way.** Collapsed, Lantern is one small lantern on the edge of the screen. It never takes keyboard focus from the app you're using, and it appears on every desktop Space and over full-screen apps.
+7. **Starts new sessions.** Pick any installed agent, a folder and an optional first message, and Lantern runs it in Lantern (in the background, with its chat in the panel) or opens it in a new Terminal window.
+8. **Answers questions and starts work.** Click the lantern for **Ask Lantern**: ask anything ("which agent needs me first?") and October's AI answers, knowing what your agents are doing. Ask it to do something ("add a dark mode toggle in october-lantern") and it answers in a line, then starts an agent on it after a 3-second "Starting… Cancel" card.
+9. **Stays out of your way.** Collapsed, Lantern is one small lantern on the edge of the screen. It never takes keyboard focus from the app you're using, and it appears on every desktop Space and over full-screen apps.
 
 Lantern does **not** replace your terminals. Your agents keep running exactly where you started them, and you can keep using them there as usual. Lantern is an extra view and remote control on top.
 
@@ -79,14 +80,17 @@ Lantern does **not** replace your terminals. Your agents keep running exactly wh
 - **Amber glow with a number:** that many agents have finished or are asking you something since you last looked.
 - **Amber glow, no number:** agents are still waiting, but you've already seen them.
 
-**Expanded.** Hover over the lantern and it grows downward into a glass capsule with buttons for **Waiting**, **Agents**, **New session (+)**, **Dictate** and **More**, then the **October** logo. It tucks back in when the mouse leaves. Drag the lantern to move it; it snaps to the nearest screen edge.
+**Clicking the lantern** opens **Ask Lantern**: ask anything or tell it what to do (clicking it again closes the panel). The stack button opens your agents' cards (Waiting, then all agents). Right-click the lantern for everything else: Ask Lantern, Your Agents, New Session, Point & Ask, Dictate, October, Settings.
+
+**Expanded.** Hover over the lantern and it grows downward into a glass capsule with three buttons: **Your agents**, **New session (+)** and **Point & Ask**. It tucks back in when the mouse leaves. Drag the lantern to move it; it snaps to the nearest screen edge.
 
 **The panel** opens beside the lantern:
+- **Ask Lantern** (click the lantern): questions get an answer in the panel (follow-ups work; "‹ New question" starts over). Requests for work get a one-line answer and a **Starting <agent> in <project>… Cancel / Start** card; after 3 seconds the agent starts with the task as its first message: in Lantern (in the background, through tmux) with its chat open in the panel, or in a Terminal window when tmux isn't installed. The chat shows your message the moment it starts, with "Starting…" until the agent is up. Open shows it in Terminal. The agent is the one you named, else your default (October Harness, then Claude Code, then Codex); the folder is the project you named (matched against recent folders and agents' folders), else your home folder. Each question carries a short summary of your running agents and nothing else from your Mac. Needs October sign-in (the same allowance as Point & Ask); signed out, the box offers Sign in.
 - **Waiting:** a card for each agent that finished or needs you since you last looked, showing its logo, handle (e.g. `@claude-2`), project, the terminal it runs in, how long ago, the session title and its last message. Cards have **Reply**, **Open** (jumps to the agent's own tab) and **Dismiss** buttons. A permission prompt ("Permission to run Bash · npm test") gets **Allow** and **Deny** buttons, and **Show full request** shows every line of the command. Below the cards, an **Earlier** list holds agents that are still waiting but that you've seen, with **Clear all**.
 - **Agents:** every running agent, the ones that need you first, with logo, handle, folder, terminal and status (*Needs you*, *Your turn*, *Working*, *Idle*, *Running*).
 - **Chat:** click any agent to slide into its conversation. Your messages appear on the right in amber bubbles, the agent's replies on the left in glass bubbles, and each command it ran as a one-line entry ("Run · npm test"). It updates live.
 - **Composer** at the bottom: "To @claude-2", a message field, a mic button and a send button.
-- **New session:** a grid of the agents installed on this Mac (with "more agents Lantern works with…" showing the rest, dimmed, each linking to where to get it), a **Model** menu (Default, the models the agent offers, a search for long lists such as October's, or any model id you type; the last choice per agent is remembered), a folder picker (recent folders, folders agents are running in, or "Choose Folder…"), an optional first message, **Context** (include a screenshot of your screen, with a preview and Retake), **Open in** *Terminal window* or *Background*, and **Start**.
+- **New session:** a grid of the agents installed on this Mac (with "more agents Lantern works with…" showing the rest, dimmed, each linking to where to get it), a **Model** menu (Default, the models the agent offers, a search for long lists such as October's, or any model id you type; the last choice per agent is remembered), a folder picker (recent folders, folders agents are running in, or "Choose Folder…"), an optional first message, **Context** (include a screenshot of your screen, with a preview and Retake), **Open in** *In Lantern* (the default when tmux is installed) or *Terminal window*, and **Start**. In Lantern, the panel shows the session's chat straight away: your message, then "Starting…" until the agent is up, when its real conversation takes over. If it can't start, the chat says why and offers **Try in Terminal**.
 - **Task:** the same form, when you click **+** while you're in DaVinci Resolve, Preview, Keynote or any app other than a terminal: the panel shows that app (and, with Accessibility allowed, its window and open document), asks "What should it do in DaVinci Resolve?", starts in the document's folder (or where the last task for that app ran), and turns the screenshot on. The agent's first message says which app, window and document you're in, and includes the toolkit list. ✕ on the app's card turns it back into a plain session.
 - **Point & Ask:** press ⌃⌥P (Settings › General can change it), or the pill's selection button (a dotted box with a pointer), or Point & Ask in the menu bar menu. The screen dims and you drag a box around what you mean, like taking a screenshot of an area; moving without dragging outlines the window under the pointer and a click picks it, Return picks the whole screen, Esc cancels. A card beside the selection shows the screenshot (Lantern's own windows left out), the app and window, the page's address in Safari, Chrome, Arc, Brave or Edge, and any selected text. Say or type your question: holding the shortcut listens while you select, a quick tap keeps listening until you press it again, and the card has its own mic. Reselect picks a different area. Then either:
   - **Ask** (Enter when signed in to October): October's AI answers right in the card, streaming, and you can ask follow-ups. It's one model call through October, not an agent session: Pro and Max use the plan's Assistant credit, and the free plan gets 20 questions a day (the card says when few are left). Copy takes the answer. Ask needs October sign-in; signed out, the card offers Sign in to Ask.
@@ -118,10 +122,10 @@ Say you have six sessions running in cmux: two Claude Code, two Codex, one OpenC
 1. **Open Lantern.** All six appear within a couple of seconds, each with its logo and a handle: `@claude-1`, `@claude-2`, `@codex-1`, `@codex-2`, `@opencode-1`, `@pi-1`. You don't register or restart anything.
 2. **Keep working.** While they run, the lantern glows softly.
 3. **An agent finishes.** When `@codex-1` finishes, the lantern turns amber with a **1**, and a notification says "@codex-1 finished · Tests pass. Want me to commit?".
-4. **Read and reply.** Click the lantern, then the card, to see the whole conversation. Type or dictate "yes, commit it" and press Enter. Lantern types it into `@codex-1`'s own cmux tab, just as if you'd typed it there.
+4. **Read and reply.** Open **Waiting**, then the card, to see the whole conversation. Type or dictate "yes, commit it" and press Enter. Lantern types it into `@codex-1`'s own cmux tab, just as if you'd typed it there.
 5. **A permission prompt** (with hooks on). `@claude-2` asks to run a command. Its card says "Claude needs your permission to use Bash" with **Allow** and **Deny**. Click **Allow** and it carries on.
 6. **Jump there.** **Open** brings `@opencode-1`'s own tab to the front if you'd rather work in the terminal.
-7. **Start another one.** Click **+**, pick Codex and a folder, type "write tests for the parser", and choose *Background*. It starts out of sight and shows up in Agents straight away.
+7. **Start another one.** Click **+**, pick Codex and a folder, type "write tests for the parser", and keep *In Lantern*. Its chat opens in the panel straight away, and the agent shows up in Your agents.
 
 ## Supported agents
 
@@ -131,7 +135,7 @@ Say you have six sessions running in cmux: two Claude Code, two Codex, one OpenC
 | Codex CLI | ✅ | ✅ | ✅ | With hooks: instant "finished" updates |
 | OpenCode | ✅ | ✅ | ✅ | Reads OpenCode's local database |
 | Pi | ✅ | ✅ | ✅ | |
-| October harness (`october`) | ✅ | ✅ | ✅ | October's own agent, built on Pi |
+| October harness (`october`) | ✅ | ✅ | ✅ | October's own agent, built on Pi. Built in: installed on first use when it isn't on your PATH, and the default agent for new sessions |
 | Gemini CLI | ✅ | ✅ | ✅ | |
 | Grok, Cursor Agent, Qwen Code, Goose, Aider, Amp, GitHub Copilot CLI, Kimi, Droid, Crush, Auggie | ✅ | — | — | Shown as *Running*; you can still reply and jump to them |
 
@@ -150,7 +154,7 @@ Headless runs (for example `claude -p` or `codex exec` in a script) are ignored 
 
 ## What's true today
 
-Lantern is in **beta (v0.4.2)**.
+Lantern is in **beta (v0.4.3)**.
 
 | Capability | Status |
 |---|---|
@@ -163,17 +167,21 @@ Lantern is in **beta (v0.4.2)**.
 | Jump to the agent's exact tab | ✅ cmux, Terminal, iTerm2, tmux |
 | Notifications | ✅ Optional |
 | Start new sessions (Terminal window or background) | ✅ Background needs tmux |
+| October Harness built in | ✅ The default agent for new sessions and assistant tasks (changeable; falls back to Claude Code, then Codex, when October can't start). Your own `october` is used when it's on your PATH; otherwise Lantern installs the pinned version on first use (not in the DMG; a few minutes and about 370 MB on disk, less when October Desktop's Node.js can be reused). Signs in with your October account when you're signed in to Lantern. |
 | Dictation, on-device only | ✅ When the Mac supports on-device recognition for your language; otherwise Lantern says so instead of sending audio to Apple |
 | Global shortcut (default ⌃⌥Space, changeable) | ✅ |
 | Welcome guide, Settings, Report a Problem, Uninstall | ✅ |
 | Automatic routing ("send this to whichever agent it's for") | ❌ Not yet. You choose the agent. |
 | Screenshot as context for a new session | ✅ Optional (New Session › Context, or Settings › General). Needs Screen Recording permission. |
+| Point & Ask (drag a box, then Ask October's AI or send to an agent) | ✅ Ask needs October sign-in (free plan: 20 questions a day; Pro and Max: the plan's Assistant credit). Needs Screen Recording permission. |
+| Ask Lantern (answers, and starts agents for requests) | ✅ Needs October sign-in, same allowance as Point & Ask. Tasks start after a 3-second cancel window. |
+| Memory | ❌ Not yet (planned: kept on your Mac) |
 | Sign in with an October account (Google, GitHub, Apple, email) | ✅ |
 | Connect to October Desktop | ✅ Read-only with any October version that runs october-core (lists October's terminals). Full connection (October's agent names and questions, replies through October's safe delivery, Open on the canvas) needs October 1.0.52 or later, after the user clicks Connect and allows Lantern in October. |
 | October phone app | ⚠️ Built, not yet tested against the real phone app and relay: sign in, then pair the phone by QR. Needs a plan that includes mobile. Lantern appears as its own computer on the October account. Treat as experimental until a live pairing and reply have been confirmed. |
 | Linux | ✅ Native Rust UI + Rust engine sidecar. Sessions, model selection, toolkit/Bus, local speech, portal screenshots/shortcuts, notifications, preferences, compact/tray and optional GNOME edge UI. Account/phone/Point & Ask controls implemented; live services require end-to-end verification. Native updater needs published Linux assets. |
 | Windows | ⚠️ Preview from source. Finds agents in Windows Terminal, VS Code and console windows, shows state and conversations, brings the terminal window to the front; tray, notifications, Ctrl+Alt+L, hooks, Credential Manager sign-in. Starts sessions in Lantern's own ConPTY sessions (shown in Windows Terminal or a console window) and replies and answers Allow/Deny there; agents started elsewhere are followed, not typed into. October Bus, screenshots of the display under the pointer, local dictation, in-app updates, and a per-user installer. Built and tested in CI; not yet tried by hand on Windows. |
-| Pricing | The core app is free forever. No account needed; signing in to October is optional. A paid October plan adds its extras, like cloud agents, automatically after sign-in. Multiplayer: coming soon (no date). |
+| Pricing | The core app is free forever. No account needed; signing in to October is optional. A paid October plan adds its extras, like cloud agents, automatically after sign-in. |
 
 ## Privacy
 
@@ -188,12 +196,14 @@ Lantern is in **beta (v0.4.2)**.
 
   Never sent: messages, prompts, commands, folder or project names, file paths, agent titles, or anything typed or dictated. PostHog derives an approximate location (country and city) from the IP address the counts arrive from, to show where Lantern is used; it isn't precise and nothing else is used for it. If you sign in to October, your usage is linked to your October account (its id and email). Turning the switch off stops sending and drops anything not yet sent. Builds from source have no PostHog key and send nothing.
 - **October account (optional).** Signing in talks to October's sign-in service (Supabase) and reads your plan from october.dev. The session is kept in the macOS Keychain.
+- **October Harness (downloaded on first use).** On a Mac without Claude Code or Codex, Lantern installs it in the background right away (about 170 MB, plus Node.js if the Mac has none) and makes it the default agent; Macs with either one download nothing until you pick October. When you start an October session (October is the default agent) and `october` isn't installed, Lantern downloads it the first time: Node.js from nodejs.org (checked against a pinned SHA-256; skipped when October Desktop already has a compatible one) and the pinned `@october-dev/october` package from the npm registry, installed without running install scripts into `~/Library/Application Support/October Lantern/` (`runtime/` and `harness/`). If you're signed in to October, October sessions get your current October access token (not the refresh token) so the harness uses your October account; the engine keeps it in memory only, and it's passed to the agent's process environment like October Desktop does. Signed out, the harness asks you to sign in itself. To keep a long session signed in, the harness asks `lantern-engine october-token` for a fresh token (`OCTOBER_TOKEN_COMMAND`); Lantern keeps the current access token for that in `~/Library/Application Support/October Lantern/october-token.json` (only you can read it; access token only, never the refresh token; deleted when you sign out).
 - **October Desktop (optional).** Lantern talks to October only on your Mac (127.0.0.1), and only after you allow it in October. You can disconnect it from either app.
 - **October phone app (optional).** Traffic goes through October's relay and is end-to-end encrypted (Noise), so the relay can't read it. Phones are paired by QR and can be revoked from Lantern.
 - **Dictation is on-device only.** Lantern uses Apple's on-device speech recognizer and never sends audio to Apple's servers: if on-device recognition isn't available for your language on this Mac, dictation says so rather than falling back. Lantern listens only while the mic button is on.
 - **The toolkit list.** Lantern keeps a short list of what this Mac has in `~/Library/Application Support/October Lantern/toolkit.md`: the chip and memory, notable command-line tools, local AI models (Ollama, whisper, Hugging Face and LM Studio caches), and apps agents can script. It's rebuilt in the background when it's a day old (or from Settings), never sent anywhere by Lantern, and given to agents you start in a Task (and in new sessions if you turn that on). Anything you write under its "Your notes" heading is kept.
 - **Tasks.** A Task tells the agent which app you're in, its front window's title and its open document's path. Reading the window and document uses macOS's Accessibility permission, asked only when you click Allow on the Task panel.
 - **Point & Ask** captures only after you start it: the area you select, the front app's name and window title, the browser's page address (macOS asks once per browser) and the selected text (with Accessibility). **Send to @agent** saves the screenshot in the agent's project (`.lantern/shots/`, excluded from git) and gives it to that agent. **Ask** sends your question, the screenshot (as a JPEG, at most 1600 pixels wide) and that same context to October (`www.october.dev/api/lantern/ask`), signed in with your October account; October picks the model (on Pro and Max a stronger one, paid from the plan's monthly Assistant credit; on the free plan a lighter one, up to 20 questions a day) and the model provider answers it. October doesn't store the screenshot or the text. Nothing is sent until you press Ask, and Lantern keeps no copy of the answer after the card closes.
+- **The assistant's Ask** sends your question, earlier questions and answers in that chat, and a short summary of your running agents (handle, agent, project, state, session title, the question it's asking and the start of its last message) to the same October endpoint. Nothing is sent until you press Return; the chat is kept only until you start a new one or quit Lantern. A task it starts runs on your Mac like any New Session; Lantern sends nothing more to October for it.
 - **Screenshots only when you ask.** Lantern takes a screenshot only if you turn on "Include a screenshot of my screen" for new sessions. It captures the display you're on when you open New Session, leaving out Lantern's own windows, and shows you a preview. When you click Start, it's saved on your Mac (`~/Library/Application Support/October Lantern/screenshots`, only readable by you, deleted after a week), and the new agent is given its path with the first message: Codex gets it attached (`--image`), and Claude Code and Gemini CLI are allowed to read that folder. Lantern itself never uploads it; the agent sends it to its model provider like any image you give it. It's never recorded continuously.
 - **Read-only by default.** Lantern reads the process list and the agents' own session files (`~/.claude/projects`, `~/.codex/sessions`, OpenCode's database, `~/.pi` / `~/.october` sessions, `~/.gemini`), and never modifies them.
 - **Typing replies.** When you send a reply, Lantern types it into that agent's terminal: through cmux's command-line tool, tmux, or macOS Automation for Terminal and iTerm2. macOS asks you once per app before Automation is allowed.
@@ -273,7 +283,7 @@ That's how Lantern types your reply into the right Terminal or iTerm2 tab. It as
 Settings › About › Uninstall October Lantern. See [Installing, updating and uninstalling](#installing-updating-and-uninstalling).
 
 **Is it free?**
-Yes. The core app is free forever, and no account is needed. A paid October plan adds extras like cloud agents after you sign in. Multiplayer is coming soon.
+Yes. The core app is free forever, and no account is needed. A paid October plan adds extras like cloud agents after you sign in.
 
 ---
 

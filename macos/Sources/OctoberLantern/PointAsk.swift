@@ -233,6 +233,7 @@ final class PointAsk: ObservableObject {
                     switch piece {
                     case .text(let text): turns[index].answer += text
                     case .note(let note): turns[index].note = note
+                    case .task: break
                     }
                 }
                 if !Task.isCancelled, turns.indices.contains(index), turns[index].id == turnID, turns[index].answer.isEmpty {

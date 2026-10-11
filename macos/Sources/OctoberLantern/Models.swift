@@ -14,6 +14,10 @@ struct AgentKind: RawRepresentable, Codable, Hashable {
         try c.encode(rawValue)
     }
 
+    static let october = AgentKind(rawValue: "october")
+    static let claude = AgentKind(rawValue: "claude")
+    static let codex = AgentKind(rawValue: "codex")
+
     /// Every agent Lantern supports, in the order New Session lists them.
     static let supported: [AgentKind] = [
         "claude", "codex", "gemini", "opencode", "pi", "october", "grok", "cursor", "copilot", "qwen", "goose", "aider", "amp",
@@ -165,7 +169,9 @@ enum EngineMessage: Decodable {
     case hello(protocolVersion: Int, version: String)
     case snapshot(agents: [Agent])
     case replyResult(requestId: String, ok: Bool, error: String?, message: String?)
-    case installed(Installed)
+    /// `harness`: October Harness's status, from engines that have it.
+    case installed(Installed, harness: HarnessStatus?)
+    case harness(HarnessStatus)
     case models(ModelList)
     /// `session`: the tmux session a started agent runs in (absent without tmux).
     case launchResult(requestId: String, ok: Bool, message: String?, session: String?)
@@ -194,8 +200,21 @@ enum EngineMessage: Decodable {
         let tmux: Bool
     }
 
+    /// October Harness, built in (see engine/src/harness.rs): `ready` (on PATH or installed by
+    /// Lantern), `installing`, `failed` (with `message`) or `missing` (installed on first use).
+    struct HarnessStatus: Decodable, Equatable {
+        let status: String
+        /// "path" (the user's own `october`) or "bundled" (Lantern's), when ready.
+        let source: String?
+        let version: String?
+        let message: String?
+
+        var isReady: Bool { status == "ready" }
+    }
+
     private enum Keys: String, CodingKey {
-        case type, `protocol`, version, agents, requestId, ok, error, message, installed, agentId, supported, messages, october, session, warning, busy
+        case type, `protocol`, version, agents, requestId, ok, error, message, installed, agentId, supported, messages, october, session, warning, busy,
+            harness
     }
 
     init(from decoder: Decoder) throws {
@@ -230,7 +249,11 @@ enum EngineMessage: Decodable {
         case "models":
             self = .models(try ModelList(from: decoder))
         case "installed":
-            self = .installed(try c.decode(Installed.self, forKey: .installed))
+            self = .installed(
+                try c.decode(Installed.self, forKey: .installed), harness: try c.decodeIfPresent(HarnessStatus.self, forKey: .harness)
+            )
+        case "harness":
+            self = .harness(try HarnessStatus(from: decoder))
         case "launchResult", "attachResult":
             let id = try c.decode(String.self, forKey: .requestId)
             let ok = try c.decode(Bool.self, forKey: .ok)

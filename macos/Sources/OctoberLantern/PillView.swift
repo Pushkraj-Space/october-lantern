@@ -23,8 +23,19 @@ struct PillView: View {
     var body: some View {
         VStack(spacing: 8) {
             LanternButton(count: model.badgeCount, waiting: !model.inbox.isEmpty, working: model.anyWorking, onTap: {
-                model.toggle(.inbox)
+                // The lantern opens Lantern's home: Ask Lantern, and what's waiting on you.
+                model.toggle(.assistant)
             }, onDrag: onDrag, onDragEnd: onDragEnd)
+            .contextMenu {
+                Button("Ask Lantern") { model.panel = .assistant }
+                Button("Your Agents") { model.panel = .inbox }
+                Button("New Session…") { model.startNew() }
+                Button("Point & Ask") { PointAsk.shared.start(fromPill: true) }
+                Button(dictation.isActive ? "Stop Dictating" : "Dictate a Reply") { model.toggleDictation() }
+                Divider()
+                Button("October…") { model.panel = .october }
+                Button("Settings…") { onMenu() }
+            }
             .overlay(alignment: .topTrailing) {
                 if let engineProblem {
                     Image(systemName: "exclamationmark")
@@ -40,11 +51,12 @@ struct PillView: View {
             if expanded {
                 VStack(spacing: 6) {
                     Rectangle().fill(Theme.stroke).frame(width: 22, height: 1).padding(.bottom, 2)
-                    PillIcon(symbol: "tray", active: model.panel == .inbox, help: "Waiting on you") {
-                        model.toggle(.inbox)
+                    PillIcon(symbol: "sparkles", tint: model.panel == .assistant ? Theme.amber : nil,
+                             active: model.panel == .assistant, help: "Ask Lantern: ask anything, or tell it what to do") {
+                        model.toggle(.assistant)
                     }
-                    PillIcon(symbol: "square.stack.3d.up", active: model.panel == .agents, help: "All agents") {
-                        model.toggle(.agents)
+                    PillIcon(symbol: "square.stack.3d.up", active: model.panel?.isList == true, help: "Your agents") {
+                        model.toggle(.inbox)
                     }
                     PillIcon(symbol: "plus", active: model.panel == .newSession, help: "New session, or a task for the app you're in") {
                         model.startNew()
@@ -53,32 +65,6 @@ struct PillView: View {
                              help: "Point & Ask: select part of the screen and ask about it") {
                         PointAsk.shared.start(fromPill: true)
                     }
-                    PillIcon(symbol: dictation.isActive ? "mic.fill" : "mic",
-                             tint: dictation.isRecording ? Theme.red : dictation.isActive ? Theme.amber : nil,
-                             help: dictation.isAuthorizing ? "Waiting for microphone permission… click to cancel" : dictation.isRecording ? "Stop dictating" : "Dictate") {
-                        model.toggleDictation()
-                    }
-                    .overlay {
-                        if dictation.isRecording {
-                            Circle().stroke(Theme.red.opacity(0.6), lineWidth: 2)
-                                .scaleEffect(1 + CGFloat(dictation.level) * 0.35)
-                                .animation(.easeOut(duration: 0.1), value: dictation.level)
-                        }
-                    }
-                    PillIcon(symbol: "ellipsis", help: "Settings") { onMenu() }
-                    Rectangle().fill(Theme.stroke).frame(width: 22, height: 1).padding(.vertical, 2)
-                    Button { model.toggle(.october) } label: {
-                        OctoberLogo(size: 26)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(model.panel == .october ? 0.7 : 0), lineWidth: 1.5)
-                                    .padding(-3)
-                            )
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .help("October")
-                    .accessibilityLabel("October")
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -135,7 +121,7 @@ struct LanternButton: View {
             }
         }
         .contentShape(Circle())
-        .help(count > 0 ? "\(count) new, waiting on you" : waiting ? "Agents are waiting on you" : "October Lantern")
+        .help(count > 0 ? "\(count) new, waiting on you · Ask Lantern" : "Ask Lantern")
         .gesture(
             DragGesture(minimumDistance: 4)
                 .onChanged { _ in onDrag() }

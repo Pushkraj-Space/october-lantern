@@ -5,11 +5,13 @@
 //!   lantern-engine agents                 print the current agents as JSON
 //!   lantern-engine hook claude|codex      hook entry point (called by the agents)
 //!   lantern-engine hooks install|uninstall|status|remove-all
+//!   lantern-engine harness status|install [--root DIR] [--download-node]
 
 mod actions;
 mod apps;
 mod bus;
 mod deliver;
+mod harness;
 mod history;
 mod hooks;
 mod launch;
@@ -94,9 +96,44 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("installed") => {
-            println!("{}", serde_json::to_string(launch::installed())?);
+            println!("{}", serde_json::to_string(&launch::installed())?);
             Ok(())
         }
+        // October Harness: its status, or install it now (into Lantern's support folder, or
+        // `--root DIR` to try the install elsewhere; `--download-node` skips October Desktop's
+        // Node.js and downloads the pinned one).
+        Some("october-token") => {
+            if !harness::print_token() {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Some("harness") => match args.get(1).map(String::as_str) {
+            Some("status") | None => {
+                let on_path = launch::on_path().kinds.contains(&model::Kind::October);
+                println!("{}", harness::status(on_path));
+                Ok(())
+            }
+            Some("install") => {
+                let root = args.iter().position(|a| a == "--root").and_then(|i| args.get(i + 1)).map(std::path::PathBuf::from);
+                let reuse = !args.iter().any(|a| a == "--download-node");
+                let started = std::time::Instant::now();
+                let b = match root {
+                    Some(root) => harness::install_into(&root, reuse)?,
+                    None if reuse => harness::ensure_installed()?,
+                    None => harness::install_into(&hooks::support_dir(), false)?,
+                };
+                println!(
+                    "October Harness {} at {} (Node.js in {}), {:.1} s",
+                    b.version,
+                    b.bin.display(),
+                    b.node_bin.display(),
+                    started.elapsed().as_secs_f32()
+                );
+                Ok(())
+            }
+            Some(other) => bail!("unknown harness command: {other}"),
+        },
         Some("--version") => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())

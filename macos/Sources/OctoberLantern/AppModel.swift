@@ -1,9 +1,10 @@
 import AppKit
+import Combine
 import LanternCore
 import SwiftUI
 
 enum PanelMode: Equatable {
-    case inbox, agents, newSession, october
+    case inbox, agents, newSession, october, assistant
 
     /// The inbox and agent list share tabs and the composer; the others are standalone.
     var isList: Bool { self == .inbox || self == .agents }
@@ -48,6 +49,11 @@ final class AppModel: ObservableObject {
     /// Installed agents; `nil` until the engine has checked.
     @Published private(set) var installedKinds: [AgentKind]?
     @Published private(set) var tmuxAvailable = false
+    /// October Harness (built in, installed on first use); `nil` until the engine has said.
+    @Published private(set) var harness: EngineMessage.HarnessStatus?
+    /// A launch waiting for October Harness to finish installing.
+    private var launchAfterHarness: (() -> Void)?
+    private var octoberSessionWatch: AnyCancellable?
     @Published private(set) var launching = false
     /// Models each agent can start with, by kind, once the engine has listed them.
     @Published private(set) var models: [String: EngineMessage.ModelList] = [:]
@@ -61,6 +67,14 @@ final class AppModel: ObservableObject {
     private var launchingModel = "default"
     /// A session Lantern just started: its conversation opens as soon as the agent shows up.
     private var openWhenSeen: (session: String, until: Date)?
+    /// A session starting in Lantern (in the background), shown as its conversation right away:
+    /// your message, and "Starting…" until the real conversation has something to show.
+    @Published private(set) var launchPreview: LaunchPreview?
+    /// Starts the previewed session again in a Terminal window instead.
+    private var previewRetry: (() -> Void)?
+    /// The preview was closed: the session still starts, but its conversation doesn't open.
+    private var previewClosed = false
+    private var previewTimeout: Task<Void, Never>?
     private var chatPoll: Task<Void, Never>?
     /// The agent whose conversation is open in the panel, if any.
     @Published private(set) var chatAgentId: String?
@@ -111,12 +125,15 @@ final class AppModel: ObservableObject {
         }
         engine.onActionResult = { [weak self] id, ok, message in self?.actionFinished(id, ok: ok, message: message) }
         engine.onLaunched = { [weak self] session in
-            self?.openWhenSeen = (session, Date().addingTimeInterval(30))
-            self?.openLaunched()
+            guard let self, !self.previewClosed else { return }
+            self.openWhenSeen = (session, Date().addingTimeInterval(30))
+            self.openLaunched()
         }
         engine.onHistory = { [weak self] agentId, supported, messages in
             guard let self, agentId == self.chatAgentId else { return }
             if self.chatLoading { self.chatLoading = false }
+            // The real conversation takes over from the preview once it has something to show.
+            if self.launchPreview != nil, !messages.isEmpty || !supported { self.endPreview() }
             if self.chatSupported != supported { self.chatSupported = supported }
             if messages != self.chatMessages { self.chatMessages = messages }
         }
@@ -132,9 +149,21 @@ final class AppModel: ObservableObject {
         engine.onInstalled = { [weak self] installed in
             self?.installedKinds = installed.kinds
             self?.tmuxAvailable = installed.tmux
+            self?.installHarnessIfNoOtherAgent()
+        }
+        engine.onHarness = { [weak self] status in self?.harnessChanged(status) }
+        // October launches sign in with your October account: the engine keeps the access token
+        // in memory (never the refresh token).
+        octoberSessionWatch = OctoberAccount.shared.$session.sink { [weak self] session in
+            self?.engine.octoberSession(accessToken: session?.accessToken, expiresAt: session?.expiresAt)
         }
         engine.onReady = { [weak self] in
             OctoberAccount.shared.engineReady()
+            if let self {
+                let s = OctoberAccount.shared.session
+                self.engine.octoberSession(accessToken: s?.accessToken, expiresAt: s?.expiresAt)
+                if self.launchAfterHarness != nil { self.engine.prepareHarness() }
+            }
             // Fetch October Bus a minute after start, so the first session on it doesn't wait.
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(60))
@@ -208,9 +237,11 @@ final class AppModel: ObservableObject {
         panel = panel == mode ? nil : mode
     }
 
+    /// Reply to an agent (opens its conversation, where the composer is), or with no agent, the
+    /// "Ask Lantern" box.
     func compose(to agent: Agent?) {
-        if let agent { targetId = agent.id }
-        if !(panel?.isList ?? false) { panel = .inbox }
+        if let agent { return openChat(agent) }
+        if panel != .assistant { panel = .assistant }
         composeFocusToken += 1
     }
 
@@ -232,11 +263,54 @@ final class AppModel: ObservableObject {
     }
 
     func closeChat() {
+        if launchPreview != nil { endPreview() }
         engine.cancelHistory()
         if chatAgentId != nil { chatAgentId = nil }
         if !chatMessages.isEmpty { chatMessages = [] }
         chatPoll?.cancel()
         chatPoll = nil
+    }
+
+    /// Closes the preview of a starting session; it keeps starting in the background (and shows
+    /// in Your agents) but its conversation won't open by itself.
+    func closePreview() {
+        if launching || pending.values.contains(where: { if case .launch = $0 { return true }; return false }) { previewClosed = true }
+        openWhenSeen = nil
+        endPreview()
+        closeChat()
+        if panel == .inbox { panel = .agents }
+    }
+
+    /// Starts the previewed session again in a Terminal window (after it failed in Lantern).
+    func retryPreviewInTerminal() {
+        guard let retry = previewRetry, !launching else { return }
+        endPreview()
+        retry()
+    }
+
+    /// For snapshots: shows a preview without starting anything.
+    func showPreview(_ preview: LaunchPreview) { launchPreview = preview }
+
+    private func endPreview() {
+        previewTimeout?.cancel()
+        previewTimeout = nil
+        previewRetry = nil
+        if launchPreview != nil { launchPreview = nil }
+    }
+
+    /// The session started; if its conversation hasn't taken over after a while (the agent is
+    /// slow to show up or to write its session file), stop waiting and show what there is.
+    private func waitForLaunched() {
+        previewTimeout?.cancel()
+        previewTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, !Task.isCancelled, self.launchPreview != nil else { return }
+            self.endPreview()
+            if self.chatAgentId == nil {
+                self.panel = .agents
+                self.show("Session started. It shows in Your agents when it's up.")
+            }
+        }
     }
 
     /// Opens the conversation of the session Lantern just started, once it appears.
@@ -381,7 +455,96 @@ final class AppModel: ObservableObject {
     func startNew() {
         if panel == .newSession { return panel = nil }
         AppContext.shared.capture()
+        prepareHarnessIfDefault()
         panel = .newSession
+    }
+
+    // MARK: Default agent and October Harness
+
+    /// The agent new sessions and tasks start with: the `defaultAgent` preference if it can start
+    /// (October counts when Lantern can install October Harness), else Claude Code, else Codex,
+    /// else the first installed agent. `nil` when no agent can start.
+    var defaultAgentKind: AgentKind? {
+        let installed = installedKinds ?? []
+        // October Harness counts once it's here (on PATH or installed by Lantern), or when there's
+        // no Claude Code or Codex: then Lantern installs it in the background (see
+        // `installHarnessIfNoOtherAgent`) and a launch waits for it.
+        let usable = { (k: AgentKind) in
+            installed.contains(k) || (k == .october && (self.harness?.isReady == true || (self.needsHarness && self.harness?.status != "failed")))
+        }
+        for kind in [AgentKind(rawValue: prefs.defaultAgent), .claude, .codex] where usable(kind) { return kind }
+        return installed.first
+    }
+
+    /// Neither Claude Code nor Codex is installed: October Harness is what this Mac can run.
+    var needsHarness: Bool {
+        guard let installed = installedKinds else { return false }
+        return !installed.contains(.claude) && !installed.contains(.codex)
+    }
+
+    /// Without Claude Code or Codex, installs October Harness in the background once (about
+    /// 170 MB, plus Node.js if this Mac has none) so Ask Lantern's tasks and New Session have an
+    /// agent to start. Macs with either one download nothing.
+    func installHarnessIfNoOtherAgent() {
+        guard needsHarness, !octoberReady, harness?.status != "installing", harness?.status != "failed" else { return }
+        prepareHarness()
+    }
+
+    /// October can start now: on PATH, or October Harness installed.
+    var octoberReady: Bool { harness?.isReady == true || (installedKinds ?? []).contains(.october) }
+
+    /// Installs October Harness in the background if it isn't ready (no UI waits on it; `harness`
+    /// follows its progress). Safe to call often.
+    func prepareHarness() {
+        guard !octoberReady, harness?.status != "installing" else { return }
+        engine.prepareHarness()
+    }
+
+    /// Kept for later: October Harness is installed only when someone picks it.
+    private func prepareHarnessIfDefault() {
+        // October Harness is installed only when someone picks it, not by opening New Session.
+    }
+
+    private func harnessChanged(_ status: EngineMessage.HarnessStatus) {
+        if harness != status { harness = status }
+        guard let next = launchAfterHarness else { return }
+        if status.isReady {
+            launchAfterHarness = nil
+            launching = false
+            next()
+        } else if status.status == "failed" {
+            launchAfterHarness = nil
+            launching = false
+            launchError = "Couldn't install October Harness: \(status.message ?? "unknown error")"
+            launchPreview?.error = launchError
+        }
+    }
+
+    /// Starts a task: `prompt` for `agent` (nil: `defaultAgentKind`) in `folder`, with the toolkit
+    /// list, like a Task from New Session. October waits for October Harness to install first when
+    /// needed (`launching` is true meanwhile); other agents start right away. The outcome shows
+    /// the usual way (`launching`, `launchError`, the "Session started" toast). False when no
+    /// agent can start or another session is still starting.
+    @discardableResult
+    func launchTask(prompt: String, agent: AgentKind?, folder: String, background: Bool) -> Bool {
+        guard let kind = agent ?? defaultAgentKind, !launching else { return false }
+        launch(kind: kind, folder: folder, prompt: prompt, toolkit: true, background: background)
+        return true
+    }
+
+    /// A message (and folder) for New Session to start with, from the assistant's Do.
+    private(set) var newSessionPrefill: (prompt: String, folder: String?)?
+
+    /// Opens New Session filled in with a task: a plain session, not a task for the app in front.
+    func startNew(prompt: String, folder: String?) {
+        newSessionPrefill = (prompt, folder)
+        if panel == .newSession { panel = nil }
+        panel = .newSession
+    }
+
+    func takeNewSessionPrefill() -> (prompt: String, folder: String?)? {
+        defer { newSessionPrefill = nil }
+        return newSessionPrefill
     }
 
     func refreshToolkit() { engine.refreshToolkit() }
@@ -397,6 +560,35 @@ final class AppModel: ObservableObject {
         toolkit: Bool = false, taskApp: String? = nil, background: Bool
     ) {
         guard !launching, !pending.values.contains(where: { if case .launch = $0 { return true }; return false }) else { return }
+        if background {
+            // Show the conversation now; the real one replaces it when the agent is up.
+            if chatAgentId != nil { closeChat() }
+            launchPreview = LaunchPreview(kind: kind, prompt: prompt, folder: folder)
+            previewClosed = false
+            previewRetry = { [weak self] in
+                self?.launch(
+                    kind: kind, folder: folder, prompt: prompt, screenshot: screenshot, model: model, context: context, toolkit: toolkit,
+                    taskApp: taskApp, background: false
+                )
+            }
+            if !(panel?.isList ?? false) { panel = .inbox }
+        } else if launchPreview != nil {
+            endPreview()
+        }
+        // October without October Harness yet: install it first, then launch (the engine's launch
+        // deadline is too short for a first install).
+        if kind == .october, installedKinds != nil, !octoberReady {
+            launching = true
+            launchError = nil
+            launchAfterHarness = { [weak self] in
+                self?.launch(
+                    kind: kind, folder: folder, prompt: prompt, screenshot: screenshot, model: model, context: context, toolkit: toolkit,
+                    taskApp: taskApp, background: background
+                )
+            }
+            if harness?.status != "installing" { engine.prepareHarness() }
+            return
+        }
         if let taskApp {
             var folders = UserDefaults.standard.dictionary(forKey: "taskFolders") as? [String: String] ?? [:]
             folders[taskApp] = folder
@@ -602,11 +794,15 @@ final class AppModel: ObservableObject {
         case .launch:
             launching = false
             Analytics.shared.capture(ok ? "session_started" : "session_start_failed", ["kind": launchingKind, "background": launchingInBackground, "screenshot": launchingWithScreenshot, "model": launchingModel, "task": launchingTask, "bus": prefs.busForSessions])
-            if ok {
-                panel = .agents
+            if ok, launchPreview != nil {
+                waitForLaunched()
+            } else if ok {
+                if !previewClosed { panel = .agents }
+                previewClosed = false
                 show(message.map { "Session started. \($0)" } ?? "Session started")
             } else {
                 launchError = message ?? "unknown error"
+                launchPreview?.error = launchError
             }
         case .focus(let agentId):
             if !ok { show("Couldn't open @\(handle(agentId)): \(message ?? "unknown error")") }
@@ -631,10 +827,21 @@ final class AppModel: ObservableObject {
         pendingSince.removeAll()
         overdue.removeAll()
         launching = false
+        launchAfterHarness = nil
+        launchPreview?.error = "Lantern's engine stopped before the session started."
         firstSnapshot = true
         agents = []
         closeChat()
         PhoneModel.shared.reset()
         show(unsure.isEmpty ? message : "\(message) Check \(names): what was being sent may or may not have gone in.")
     }
+}
+
+/// A session starting in Lantern, shown before its real conversation exists.
+struct LaunchPreview: Equatable {
+    let kind: AgentKind
+    let prompt: String
+    let folder: String
+    /// Why it couldn't start.
+    var error: String?
 }

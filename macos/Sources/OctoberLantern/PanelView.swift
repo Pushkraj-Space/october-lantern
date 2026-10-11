@@ -4,6 +4,7 @@ import SwiftUI
 struct PanelView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var dictation: Dictation
+    @ObservedObject var assistant = Assistant.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,8 +16,12 @@ struct PanelView: View {
             case .october:
                 PanelTitle(title: "October", model: model)
                 OctoberView(model: model)
+            case .assistant:
+                AssistantHome(model: model)
             default:
-                if let agent = model.chatAgent {
+                if let preview = model.launchPreview {
+                    StartingChatView(preview: preview, model: model)
+                } else if let agent = model.chatAgent {
                     ChatView(agent: agent, model: model)
                 } else {
                 header
@@ -43,7 +48,7 @@ struct PanelView: View {
                     .transition(.opacity)
             }
             if model.panel?.isList ?? true {
-                Composer(model: model, dictation: dictation)
+                if model.chatAgent != nil, model.launchPreview == nil { Composer(model: model, dictation: dictation) }
             }
         }
         .frame(width: 380)
@@ -394,6 +399,14 @@ struct Composer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if model.chatAgentId != nil {
+                // Inside a conversation the header already names the agent; only say how a reply
+                // gets there when Lantern can't type it in.
+                if let t = model.target, !t.canReply {
+                    Text("Your reply is copied, and Lantern opens \(t.host?.app ?? "its terminal")")
+                        .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                }
+            } else {
             Menu {
                 ForEach(model.agents) { agent in
                     // Inside a conversation, the recipient is the conversation: choosing another
@@ -415,6 +428,7 @@ struct Composer: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            }
 
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(model.target.map { "Message @\($0.handle)…" } ?? "Message an agent…", text: $model.draft, axis: .vertical)

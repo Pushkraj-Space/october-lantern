@@ -17,17 +17,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Development: `--snapshot <dir>` draws the welcome pages and settings tabs offscreen into
         // PNGs and quits, for checking layouts without putting windows on screen.
-        // Development: `--ask <image> <question>` asks October's AI once, prints the answer and quits.
+        // Development: `--ask <image> <question>` asks October's AI once, prints the answer and quits
+        // (`--ask chat <question>` asks the way the assistant does: no image, chat mode).
         if let i = CommandLine.arguments.firstIndex(of: "--ask"), i + 2 < CommandLine.arguments.count {
             let image = NSImage(contentsOfFile: CommandLine.arguments[i + 1])?.cgImage(forProposedRect: nil, context: nil, hints: nil)
             Task { @MainActor in
                 do {
+                    let chat = CommandLine.arguments[i + 1] == "chat"
                     let request = OctoberAI.Request(turns: [], question: CommandLine.arguments[i + 2],
-                                                    image: image.flatMap(PointAsk.jpeg), context: "App: Safari")
+                                                    image: chat ? nil : image.flatMap(PointAsk.jpeg),
+                                                    context: chat ? "- @claude-1 (Claude Code) in october-lantern: waiting; asking: Run the release script?" : "App: Safari",
+                                                    mode: chat ? "chat" : nil)
                     for try await piece in OctoberAI.stream(request) {
                         switch piece {
                         case .text(let t): print(t, terminator: "")
                         case .note(let n): print("\n[note] \(n)")
+                        case .task(let prompt, let agent, let project): print("\n[task] agent=\(agent ?? "-") project=\(project ?? "-") prompt=\(prompt)")
                         }
                         fflush(stdout)
                     }
@@ -46,10 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         windows = WindowController(model: model)
-        windows.onMenu = { [weak self] view in
-            guard let self else { return }
-            self.menu().popUp(positioning: nil, at: NSPoint(x: view.bounds.midX, y: view.bounds.midY), in: view)
-        }
+        // The lantern's right-click menu ends with Settings…
+        windows.onMenu = { [weak self] _ in self?.showSettings() }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let icon = (Assets.logo?.copy() as? NSImage) ?? NSImage(systemSymbolName: "flame", accessibilityDescription: nil)
@@ -62,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] preset in self?.registerHotKey(preset) }
             .store(in: &subscriptions)
         PointAsk.shared.model = model
+        Assistant.shared.model = model
         Preferences.shared.$pointAsk
             .sink { [weak self] preset in self?.registerPointAsk(preset) }
             .store(in: &subscriptions)
@@ -101,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case "settings": self.showSettings(tab: page)
                 case "point": PointAsk.shared.showDemo()
                 default:
-                    self.model.panel = ["agents": .agents, "new": .newSession, "october": .october][what] ?? .inbox
+                    self.model.panel = ["agents": .agents, "new": .newSession, "october": .october, "assistant": .assistant][what] ?? .inbox
                     if what == "chat", let first = self.model.inbox.first ?? self.model.agents.first {
                         self.model.openChat(first)
                     }
@@ -179,14 +183,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func snapshot(into dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var jobs: [(String, AnyView)] = (0..<4).map { ("welcome-\($0)", AnyView(WelcomeView(model: model, onDone: {}, step: $0))) }
+        var jobs: [(String, AnyView)] = (0..<3).map { ("welcome-\($0)", AnyView(WelcomeView(model: model, onDone: {}, step: $0))) }
         jobs += (0..<4).map { ("settings-\($0)", AnyView(SettingsView(model: model, onShowWelcome: {}, tab: $0))) }
-        let panels: [(String, PanelMode)] = [("inbox", .inbox), ("agents", .agents), ("new", .newSession), ("october", .october), ("chat", .agents)]
+        let panels: [(String, PanelMode)] = [("inbox", .inbox), ("agents", .agents), ("new", .newSession), ("october", .october), ("chat", .agents), ("assistant", .assistant),
+                                                ("starting", .inbox), ("starting-failed", .inbox)]
         jobs += panels.map { name, mode in
             ("panel-\(name)", AnyView(PanelView(model: model, dictation: model.dictation).onAppear {
                 self.model.closeChat()
                 self.model.panel = mode
                 if name == "chat", let first = self.model.inbox.first ?? self.model.agents.first { self.model.openChat(first) }
+                if name.hasPrefix("starting") {
+                    self.model.showPreview(LaunchPreview(
+                        kind: .claude, prompt: "Find my passport scan and tell me where it is.\n\n(Started from October Lantern on macOS.)",
+                        folder: NSHomeDirectory(), error: name == "starting" ? nil : "tmux exited before the agent started."))
+                }
             }))
         }
         jobs.append(("account-signed-out", AnyView(AccountCard(account: .detached()).padding(14).frame(width: 380).background(Color.black))))

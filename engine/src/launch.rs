@@ -86,7 +86,7 @@ pub struct Installed {
 
 /// Which agents are installed, according to the user's login shell. Cached: it takes a moment.
 /// A shell whose startup files take longer than 10 s counts as finding nothing.
-pub fn installed() -> &'static Installed {
+pub fn on_path() -> &'static Installed {
     static CACHE: OnceLock<Installed> = OnceLock::new();
     #[cfg(windows)]
     return CACHE.get_or_init(|| Installed {
@@ -106,6 +106,40 @@ pub fn installed() -> &'static Installed {
             tmux: Path::new(tmux::tmux_bin()).is_absolute(),
         }
     })
+}
+
+/// Which agents can be started: those on the user's PATH, and October when Lantern's own October
+/// Harness is installed (see `harness`).
+pub fn installed() -> Installed {
+    with_bundled(on_path(), crate::harness::binary().is_some())
+}
+
+pub(crate) fn with_bundled(on_path: &Installed, bundled_october: bool) -> Installed {
+    let mut i = on_path.clone();
+    if bundled_october && !i.kinds.contains(&Kind::October) {
+        i.kinds.push(Kind::October);
+    }
+    i
+}
+
+/// What a launch adds besides the agent's own arguments: the program to run in place of the
+/// agent's name (a full path), a folder to put first on PATH, and environment.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct LaunchEnv {
+    pub program: Option<String>,
+    pub path_prefix: Option<String>,
+    pub env: Vec<(String, String)>,
+}
+
+/// October: the user's own `october` when it's on PATH, else Lantern's October Harness with its
+/// Node.js first on PATH. Either way it gets the October sign-in, when the app has one.
+pub(crate) fn october_env(on_path: bool, bundled: Option<&crate::harness::Bundled>, session: Vec<(String, String)>) -> LaunchEnv {
+    let bundled = bundled.filter(|_| !on_path);
+    LaunchEnv {
+        program: bundled.map(|b| b.bin.to_string_lossy().into_owned()),
+        path_prefix: bundled.map(|b| b.node_bin.to_string_lossy().into_owned()),
+        env: session,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +195,18 @@ pub struct Extras<'a> {
     pub bus_note: Option<&'a str>,
 }
 
+/// How Lantern asks every agent it starts to answer, after the first message: where it is, and
+/// to give full paths (the person reads the answer in Lantern and opens files from it).
+pub(crate) fn with_guidance(message: String, cwd: &Path) -> String {
+    format!(
+        "{message}\n\n(Started from October Lantern on macOS. You're in {}. When you mention a file or folder, \
+         give its full absolute path (like /Users/name/Documents/file.pdf), not a relative one, so it can be opened \
+         directly. If the task is about something outside this folder, look for it across the Mac (for example with \
+         mdfind or find under the home folder). End with a short summary of what you did or found.)",
+        cwd.display()
+    )
+}
+
 /// The first message: your words, then the context, the screenshot's path and the toolkit list.
 /// Nothing is sent when there are no words and no screenshot (an agent would act on context
 /// alone).
@@ -187,7 +233,7 @@ pub fn first_message(prompt: Option<&str>, extras: Extras) -> Option<String> {
     Some(out)
 }
 
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn agent_command(
     kind: Kind,
     cwd: &Path,
@@ -196,10 +242,27 @@ pub(crate) fn agent_command(
     model: Option<&str>,
     bus: Option<&crate::bus::Attach>,
 ) -> String {
-    // On October Bus: its environment, a wrapper command (the October harness), or arguments.
-    let env: String = bus.map(|b| b.env.iter().map(|(k, v)| format!("{k}={} ", quote(v))).collect()).unwrap_or_default();
+    agent_command_with(kind, cwd, prompt, screenshot, model, bus, &LaunchEnv::default())
+}
+
+pub(crate) fn agent_command_with(
+    kind: Kind,
+    cwd: &Path,
+    prompt: Option<&str>,
+    screenshot: Option<&Path>,
+    model: Option<&str>,
+    bus: Option<&crate::bus::Attach>,
+    extra: &LaunchEnv,
+) -> String {
+    // The launch's own PATH folder and environment, then October Bus's: its environment, a
+    // wrapper command (the October harness), or arguments.
+    let mut env: String = extra.path_prefix.as_ref().map(|p| format!("PATH={}:\"$PATH\" ", quote(p))).unwrap_or_default();
+    for (k, v) in extra.env.iter().chain(bus.map(|b| b.env.as_slice()).unwrap_or_default()) {
+        env.push_str(&format!("{k}={} ", quote(v)));
+    }
     let wrap: String = bus.map(|b| b.wrap.iter().map(|w| format!("{w} ")).collect()).unwrap_or_default();
-    let mut cmd = format!("cd {} && {env}exec {wrap}{}", quote(&cwd.to_string_lossy()), program(kind));
+    let program = extra.program.as_deref().map(quote).unwrap_or_else(|| program(kind).to_string());
+    let mut cmd = format!("cd {} && {env}exec {wrap}{program}", quote(&cwd.to_string_lossy()));
     for arg in bus.map(|b| b.args.as_slice()).unwrap_or_default() {
         cmd.push(' ');
         cmd.push_str(arg);
@@ -267,9 +330,13 @@ pub(crate) fn agent_argv(
     screenshot: Option<&Path>,
     model: Option<&str>,
     bus: Option<&crate::bus::Attach>,
+    program_override: Option<&Path>,
 ) -> Result<(PathBuf, Vec<String>)> {
     let name = program(kind);
-    let found = crate::platform::find_on_path(name).with_context(|| format!("{name} isn't on PATH"))?;
+    let found = match program_override {
+        Some(p) => p.to_path_buf(),
+        None => crate::platform::find_on_path(name).with_context(|| format!("{name} isn't on PATH"))?,
+    };
     let ext = found.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     let (program, mut args) = match ext.as_str() {
         "exe" | "com" => (found, Vec::new()),
@@ -332,15 +399,23 @@ fn launch_session(
     model: Option<&str>,
     bus: Option<crate::bus::Attach>,
     bus_problem: Option<String>,
+    extra: &LaunchEnv,
     mode: Mode,
     deadline: Instant,
 ) -> Result<Launched> {
-    let (program, args) = agent_argv(kind, prompt, screenshot, model, bus.as_ref())?;
+    let program_override = extra.program.as_deref().map(Path::new);
+    let (program, args) = agent_argv(kind, prompt, screenshot, model, bus.as_ref(), program_override)?;
     let project = cwd.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let safe: String = project.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(24).collect();
     let session = format!("{}-{}-{}", kind.as_str(), safe, now_ms() % 100_000);
     check_launch_deadline(deadline)?;
-    let env = bus.as_ref().map(|b| b.env.clone()).unwrap_or_default();
+    // The launch's own PATH folder and environment, then October Bus's (as `agent_command_with`).
+    let mut env: Vec<(String, String)> = Vec::new();
+    if let Some(prefix) = &extra.path_prefix {
+        env.push(("PATH".into(), format!("{prefix};{}", std::env::var("PATH").unwrap_or_default())));
+    }
+    env.extend(extra.env.iter().cloned());
+    env.extend(bus.as_ref().map(|b| b.env.clone()).unwrap_or_default());
     let spec = crate::pty::Spec { cwd: cwd.to_path_buf(), program, args, env };
     crate::pty::start(&session, &spec)?;
     if let Some(b) = &bus {
@@ -417,9 +492,19 @@ pub fn launch(
     if !cwd.is_dir() {
         bail!("{} is not a folder", cwd.display());
     }
-    if !installed().kinds.contains(&kind) {
-        bail!("{} isn't installed", program(kind));
-    }
+    let extra = if kind == Kind::October {
+        let on_path = on_path().kinds.contains(&Kind::October);
+        // Install Lantern's October Harness if needed, leaving a few seconds of the deadline for
+        // starting the session itself (the app normally prepares it ahead: `harness.prepare`).
+        let until = deadline.checked_sub(Duration::from_secs(8)).unwrap_or(deadline);
+        let bundled = if on_path { None } else { Some(crate::harness::wait_installed(until)?) };
+        october_env(on_path, bundled.as_ref(), crate::harness::session_env())
+    } else {
+        if !installed().kinds.contains(&kind) {
+            bail!("{} isn't installed", program(kind));
+        }
+        LaunchEnv::default()
+    };
     if let Some(s) = screenshot {
         let inside = s.canonicalize().ok().zip(screenshots_dir().canonicalize().ok()).is_some_and(|(s, dir)| s.starts_with(dir));
         if !inside || !s.is_file() {
@@ -453,13 +538,13 @@ pub fn launch(
     };
     let note = bus.as_ref().map(|b| crate::bus::note(&b.name));
     let extras = Extras { bus_note: note.as_deref(), ..extras };
-    let message = first_message(prompt.map(str::trim).filter(|p| !p.is_empty()), extras);
+    let message = first_message(prompt.map(str::trim).filter(|p| !p.is_empty()), extras).map(|m| with_guidance(m, cwd));
     let prompt = message.as_deref();
 
     #[cfg(unix)]
-    let launched = launch_tmux(kind, cwd, prompt, screenshot, model, bus, bus_problem, mode, deadline);
+    let launched = launch_tmux(kind, cwd, prompt, screenshot, model, bus, bus_problem, &extra, mode, deadline);
     #[cfg(windows)]
-    let launched = launch_session(kind, cwd, prompt, screenshot, model, bus, bus_problem, mode, deadline);
+    let launched = launch_session(kind, cwd, prompt, screenshot, model, bus, bus_problem, &extra, mode, deadline);
     launched
 }
 
@@ -474,6 +559,7 @@ fn launch_tmux(
     model: Option<&str>,
     bus: Option<crate::bus::Attach>,
     bus_problem: Option<String>,
+    extra: &LaunchEnv,
     mode: Mode,
     deadline: Instant,
 ) -> Result<Launched> {
@@ -486,7 +572,7 @@ fn launch_tmux(
         }
         let name = format!("{}-{}", kind.as_str(), now_ms());
         check_launch_deadline(deadline)?;
-        open_in_terminal(&name, &agent_command(kind, cwd, prompt, screenshot, model, bus.as_ref()))?;
+        open_in_terminal(&name, &agent_command_with(kind, cwd, prompt, screenshot, model, bus.as_ref(), extra))?;
         if let Some(b) = &bus {
             crate::bus::link_when_ready(b.id.clone());
         }
@@ -500,7 +586,7 @@ fn launch_tmux(
     let status = status
         .args(["-L", LANTERN_SOCKET, "new-session", "-d", "-s", &session, "-x", "200", "-y", "50", "-c"])
         .arg(cwd)
-        .arg(agent_command(kind, cwd, prompt, screenshot, model, bus.as_ref()));
+        .arg(agent_command_with(kind, cwd, prompt, screenshot, model, bus.as_ref(), extra));
     check_launch_deadline(deadline)?;
     let out = crate::run::output(status, Duration::from_secs(10)).context("starting tmux")?;
     if !out.status.success() {

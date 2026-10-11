@@ -12,11 +12,11 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $tab) {
             general.tabItem { Label("General", systemImage: "gearshape") }.tag(0)
-            notifications.tabItem { Label("Notifications", systemImage: "bell") }.tag(1)
-            agents.tabItem { Label("Agents", systemImage: "square.stack.3d.up") }.tag(2)
+            agents.tabItem { Label("Agents", systemImage: "square.stack.3d.up") }.tag(1)
+            october.tabItem { Label("October", systemImage: "leaf") }.tag(2)
             about.tabItem { Label("About", systemImage: "info.circle") }.tag(3)
         }
-        .frame(width: 520, height: 440)
+        .frame(width: 520, height: 480)
         .task {
             hooks.refresh()
             await notifier.refreshStatus()
@@ -73,12 +73,14 @@ struct SettingsView: View {
             } header: {
                 Text("Exact status from agent hooks")
             }
+            notifications
         }
         .formStyle(.grouped)
     }
 
+    /// Notifications, as a section of General.
     private var notifications: some View {
-        Form {
+        Section {
             Toggle("Notify me when an agent needs me", isOn: $prefs.notificationsEnabled)
                 .onChange(of: prefs.notificationsEnabled) { _, on in
                     // Ask macOS the first time they're turned on.
@@ -99,8 +101,24 @@ struct SettingsView: View {
             if notifier.status != .denied {
                 Button("Open Notification Settings…") { Notifier.openSystemSettings() }
             }
+        } header: {
+            Text("Notifications")
         }
-        .formStyle(.grouped)
+    }
+
+    /// Your October account, October Desktop, and the phone (when it's ready), as full cards.
+    private var october: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Lantern works on its own. Signing in to October adds Ask and Point & Ask answers; October Desktop shows its agents here.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                AccountCard()
+                DesktopCard(model: model)
+            }
+            .padding(20)
+        }
+        .background(Color(white: 0.11))
+        .environment(\.colorScheme, .dark)
     }
 
     private var agents: some View {
