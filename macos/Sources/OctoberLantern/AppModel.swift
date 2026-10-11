@@ -138,6 +138,7 @@ final class AppModel: ObservableObject {
         engine.onInstalled = { [weak self] installed in
             self?.installedKinds = installed.kinds
             self?.tmuxAvailable = installed.tmux
+            self?.installHarnessIfNoOtherAgent()
         }
         engine.onHarness = { [weak self] status in self?.harnessChanged(status) }
         // October launches sign in with your October account: the engine keeps the access token
@@ -411,11 +412,28 @@ final class AppModel: ObservableObject {
     /// else the first installed agent. `nil` when no agent can start.
     var defaultAgentKind: AgentKind? {
         let installed = installedKinds ?? []
-        // October Harness counts only once it's actually here (on PATH or installed by Lantern):
-        // installing it is a large download, and it can't use Lantern's October sign-in yet.
-        let usable = { (k: AgentKind) in installed.contains(k) || (k == .october && self.harness?.isReady == true) }
+        // October Harness counts once it's here (on PATH or installed by Lantern), or when there's
+        // no Claude Code or Codex: then Lantern installs it in the background (see
+        // `installHarnessIfNoOtherAgent`) and a launch waits for it.
+        let usable = { (k: AgentKind) in
+            installed.contains(k) || (k == .october && (self.harness?.isReady == true || (self.needsHarness && self.harness?.status != "failed")))
+        }
         for kind in [AgentKind(rawValue: prefs.defaultAgent), .claude, .codex] where usable(kind) { return kind }
         return installed.first
+    }
+
+    /// Neither Claude Code nor Codex is installed: October Harness is what this Mac can run.
+    var needsHarness: Bool {
+        guard let installed = installedKinds else { return false }
+        return !installed.contains(.claude) && !installed.contains(.codex)
+    }
+
+    /// Without Claude Code or Codex, installs October Harness in the background once (about
+    /// 170 MB, plus Node.js if this Mac has none) so Ask Lantern's tasks and New Session have an
+    /// agent to start. Macs with either one download nothing.
+    func installHarnessIfNoOtherAgent() {
+        guard needsHarness, !octoberReady, harness?.status != "installing", harness?.status != "failed" else { return }
+        prepareHarness()
     }
 
     /// October can start now: on PATH, or October Harness installed.

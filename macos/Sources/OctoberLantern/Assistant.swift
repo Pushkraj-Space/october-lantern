@@ -98,7 +98,7 @@ final class Assistant: ObservableObject {
         guard let model else { return }
         let installed = model.installedKinds ?? []
         let named = agent.flatMap { AgentKind(rawValue: $0) }.flatMap { installed.contains($0) ? $0 : nil }
-        guard let kind = named ?? Self.defaultKind(installed) else { return }
+        guard let kind = named ?? model.defaultAgentKind else { return }
         let folder = Self.folder(for: project, model: model)
         cancelTask()
         pending = PendingTask(prompt: prompt, kind: kind, folder: folder, secondsLeft: 3)
@@ -125,7 +125,8 @@ final class Assistant: ObservableObject {
     private func startPending(turn: UUID) {
         guard let p = pending, let model else { return }
         pending = nil
-        model.launch(kind: p.kind, folder: p.folder, prompt: p.prompt, background: false)
+        // Waits for October Harness to finish installing when that's the agent.
+        _ = model.launchTask(prompt: p.prompt, agent: p.kind, folder: p.folder, background: false)
         if let i = turns.firstIndex(where: { $0.id == turn }) {
             turns[i].started = "Started \(p.kind.displayName) in \(URL(fileURLWithPath: p.folder).lastPathComponent)"
         }
