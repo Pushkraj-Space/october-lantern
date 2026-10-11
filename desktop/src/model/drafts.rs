@@ -5,6 +5,11 @@
 //!
 //! The UI changes text only through [`Drafts::edit_text`]. Recipient changes (`address`, `readdress`)
 //! and acknowledgements are domain transitions made by `app::Lantern::apply`.
+//!
+//! Invariant: an acknowledgement never clears a newer edit. Every text write (typing, `edit_text`,
+//! dictation `append`, programmatic `set`) goes through `set`, which gives a new revision; `readdress`
+//! moves a draft to another recipient key, so a ticket for the old recipient no longer matches it.
+//! `sent` clears only when both the recipient and the revision still match the ticket.
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -273,6 +278,17 @@ mod tests {
         d.append("and the logs", "A");
         d.sent(&sent);
         assert_eq!(d.text_for("A"), "check this and the logs");
+    }
+
+    #[test]
+    fn an_ack_never_clears_a_draft_that_moved_to_another_recipient() {
+        let mut d = Drafts::default();
+        d.address(Some("A"));
+        typed(&mut d, "deploy it");
+        let sent = d.ticket().unwrap();
+        d.readdress("B");
+        d.sent(&sent);
+        assert_eq!(d.text_for("B"), "deploy it");
     }
 
     #[test]
