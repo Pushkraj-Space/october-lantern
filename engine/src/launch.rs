@@ -257,6 +257,8 @@ pub(crate) fn agent_command(
     agent_command_with(kind, cwd, prompt, screenshot, model, bus, &LaunchEnv::default())
 }
 
+// tmux launches (Unix) and tests; Windows starts Lantern's own sessions with `agent_argv`.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn agent_command_with(
     kind: Kind,
     cwd: &Path,

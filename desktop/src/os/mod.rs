@@ -108,6 +108,8 @@ pub fn tray_menu() -> Vec<Option<(String, String)>> {
         Some(("Quit".into(), "quit".into())),
     ]
 }
+/// The Linux tray refreshes its menu when this changes (the Windows tray builds it on each open).
+#[cfg(target_os = "linux")]
 pub fn tray_menu_version() -> u64 {
     TRAY_VERSION.load(std::sync::atomic::Ordering::SeqCst)
 }
