@@ -97,6 +97,10 @@ impl Windows {
         self.quitting = true;
     }
     #[cfg(test)]
+    pub fn clipboard(&self) -> Option<&str> {
+        self.clipboard.as_deref()
+    }
+    #[cfg(test)]
     pub fn quitting(&self) -> bool {
         self.quitting
     }

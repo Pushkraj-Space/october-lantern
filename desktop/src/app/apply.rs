@@ -188,8 +188,12 @@ impl Lantern {
             return;
         }
         let Some(ticket) = self.inputs.drafts.ticket() else { return };
-        if !self.model.agent(agent_id).is_some_and(|agent| agent.can_reply) {
-            // TODO(apollo): copy and open the terminal, with the platform's paste instruction.
+        let Some(agent) = self.model.agent(agent_id).cloned() else { return };
+        if !agent.can_reply {
+            // Swift `AppModel.send`: copy, bring the terminal forward, and the draft is done.
+            self.stop_dictation_if_away(None);
+            self.copy_to_terminal(&agent, ticket.text.clone());
+            self.inputs.drafts.sent(&ticket);
             return;
         }
         if let Some(id) = self.request(json!({"type": "reply", "agentId": agent_id, "text": ticket.text})) {
@@ -260,6 +264,36 @@ fn problem_report(agents: &[crate::model::Agent]) -> String {
             .collect::<String>()
     };
     format!("mailto:{SUPPORT_EMAIL}?subject={}&body={}", encode(&format!("October Lantern {version}: a problem")), encode(&body))
+}
+
+#[cfg(test)]
+mod reply_tests {
+    use crate::model::{Agent, AgentKind, AgentState, HostApp};
+
+    #[test]
+    fn a_reply_lantern_cannot_type_is_copied_with_the_paste_shortcut_and_the_draft_clears() {
+        let (engine, _) = crate::sidecar::test_sender();
+        let mut lantern = super::Lantern::new(engine, None);
+        lantern.connected = true;
+        lantern.model.agents = vec![Agent {
+            id: "codex:7".into(),
+            kind: AgentKind::new("codex"),
+            handle: "codex-7".into(),
+            state: AgentState::Waiting,
+            can_reply: false,
+            host: Some(HostApp { app: "Windows Terminal".into(), ..Default::default() }),
+            ..Default::default()
+        }];
+        lantern.model.caps.platform = crate::model::Platform::Windows;
+        lantern.inputs.drafts.address(Some("codex:7"));
+        lantern.inputs.drafts.edit_text(None, |text| text.push_str("run the tests"));
+        lantern.send_reply("codex:7");
+        assert_eq!(lantern.windows.clipboard(), Some("run the tests"));
+        assert_eq!(lantern.inputs.drafts.text(), "", "the draft is done");
+        assert!(!lantern.model.sending);
+        let toast = lantern.model.toast.as_ref().map(|toast| toast.text.as_str()).unwrap_or_default();
+        assert_eq!(toast, "Copied. Paste into @codex-7 in Windows Terminal with Ctrl+V");
+    }
 }
 
 #[cfg(test)]

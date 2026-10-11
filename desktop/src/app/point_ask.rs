@@ -368,6 +368,12 @@ impl Lantern {
             }
             return;
         }
+        self.copy_to_terminal(&agent, text);
+    }
+
+    /// A terminal Lantern can't type into (on Windows, any agent Lantern didn't start): copy the
+    /// text and bring that terminal forward, with the paste shortcut (Swift `AppModel.send`).
+    pub(super) fn copy_to_terminal(&mut self, agent: &crate::model::Agent, text: String) {
         self.windows.copy(text);
         crate::os::allow_focus(self.engine.pid());
         if let Some(id) = self.request(serde_json::json!({"type": "focus", "agentId": agent.id})) {
