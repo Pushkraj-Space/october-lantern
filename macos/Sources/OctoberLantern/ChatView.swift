@@ -138,6 +138,15 @@ struct Bubble: View {
     /// The message's full height, measured, to offer More only when something is cut off.
     @State private var fullHeight: CGFloat = 0
 
+    /// Your first message without what Lantern added for the agent (October Bus, the folder and
+    /// full-path note, the screenshot path, the toolkit list): the agent still gets all of it.
+    static func withoutLanternNotes(_ text: String) -> String {
+        let markers = ["\n\nYou're connected to October Bus", "\n\n(Started from October Lantern",
+                       "\n\nFor context, a screenshot of my screen", "\n\nWhat this Mac already has"]
+        let cut = markers.compactMap { text.range(of: $0)?.lowerBound }.min()
+        return cut.map { String(text[..<$0]) } ?? text
+    }
+
     private var collapsedHeight: CGFloat { message.role == .user ? 200 : 280 }
     private var clipped: Bool { fullHeight > collapsedHeight + 1 }
 
@@ -175,7 +184,8 @@ struct Bubble: View {
     }
 
     private var collapsible: some View {
-        MarkdownBlocks(text: message.text, ink: message.role == .user ? Theme.ink : Theme.ink.opacity(0.92))
+        MarkdownBlocks(text: message.role == .user ? Self.withoutLanternNotes(message.text) : message.text,
+                       ink: message.role == .user ? Theme.ink : Theme.ink.opacity(0.92))
             .fixedSize(horizontal: false, vertical: true)
             .background(GeometryReader { g in
                 Color.clear.onAppear { fullHeight = g.size.height }.onChange(of: g.size.height) { _, h in fullHeight = h }
