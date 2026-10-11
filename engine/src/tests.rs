@@ -929,19 +929,26 @@ fn october_agents_match_their_node() {
 #[test]
 fn harness_pin_is_read_and_checked() {
     use crate::harness::{parse_node_version, parse_pin, pin};
-    let shipped = pin().expect("engine/harness.json must parse for this Mac");
+    let shipped = pin().expect("engine/harness.json must have a pin for this system");
     assert_eq!(shipped.package, "@october-dev/october");
     assert!(shipped.node_minimum >= (22, 19, 0));
     assert!(parse_node_version(&shipped.node_version).unwrap() >= shipped.node_minimum, "the pinned Node.js must satisfy the harness");
     let json = include_str!("../harness.json");
-    for (arch, node) in [("arm64", "arm64"), ("x86_64", "x64")] {
-        let p = parse_pin(json, arch).unwrap();
-        assert!(p.node_url.ends_with(&format!("-darwin-{node}.tar.gz")), "{}", p.node_url);
+    for (key, archive) in [
+        ("darwin-arm64", "tar.gz"),
+        ("darwin-x64", "tar.gz"),
+        ("linux-x64", "tar.xz"),
+        ("linux-arm64", "tar.xz"),
+        ("win-x64", "zip"),
+        ("win-arm64", "zip"),
+    ] {
+        let p = parse_pin(json, key).unwrap();
+        assert!(p.node_url.ends_with(&format!("-{key}.{archive}")), "{}", p.node_url);
         assert_eq!(p.node_sha256.len(), 64);
     }
     // Anything off is no pin at all.
-    assert!(parse_pin(&json.replace("https://nodejs.org/dist/", "http://example.com/"), "arm64").is_none());
-    assert!(parse_pin(&json.replace("bed7eea5", "zzzzzzzz"), "arm64").is_none());
+    assert!(parse_pin(&json.replace("https://nodejs.org/dist/", "http://example.com/"), "darwin-arm64").is_none());
+    assert!(parse_pin(&json.replace("bed7eea5", "zzzzzzzz"), "darwin-arm64").is_none());
     assert!(parse_pin(json, "riscv").is_none());
     assert_eq!(parse_node_version("v22.19.0\n"), Some((22, 19, 0)));
     assert_eq!(parse_node_version("24.21"), Some((24, 21, 0)));
@@ -956,6 +963,41 @@ fn harness_pin_is_read_and_checked() {
     assert!(!allows(&json!(["!darwin"]), "darwin"));
     assert!(allows(&json!(["!win32"]), "darwin"));
     assert!(!allows(&json!(["x64"]), "arm64"));
+}
+
+#[test]
+fn harness_targets_name_each_systems_files() {
+    use crate::harness::Target;
+    use std::path::Path;
+    let mac = Target { os: "darwin", arch: "arm64" };
+    let linux = Target { os: "linux", arch: "x64" };
+    let windows = Target { os: "win", arch: "x64" };
+    assert_eq!((mac.key(), mac.archive(), mac.npm_os()), ("darwin-arm64".into(), "tar.gz", "darwin"));
+    assert_eq!((linux.key(), linux.archive(), linux.npm_os()), ("linux-x64".into(), "tar.xz", "linux"));
+    assert_eq!((windows.key(), windows.archive(), windows.npm_os()), ("win-x64".into(), "zip", "win32"));
+    let node = Path::new("/r/node-v24.21.0-linux-x64");
+    assert_eq!(linux.node_bin(node), node.join("bin"));
+    assert_eq!(linux.node_exe(&linux.node_bin(node)), node.join("bin").join("node"));
+    assert_eq!(linux.npm_cli(node), node.join("lib/node_modules/npm/bin/npm-cli.js"));
+    assert_eq!(linux.node_dir(&linux.node_bin(node)).as_deref(), Some(node));
+    let win = Path::new(r"C:\r\node-v24.21.0-win-x64");
+    assert_eq!(windows.node_bin(win), win);
+    assert_eq!(windows.node_exe(win), win.join("node.exe"));
+    assert_eq!(windows.npm_cli(win), win.join("node_modules").join("npm").join("bin").join("npm-cli.js"));
+    assert_eq!(windows.harness_bin(Path::new("h")), Path::new("h").join("node_modules").join(".bin").join("october.cmd"));
+    assert_eq!((linux.path_separator(), windows.path_separator()), (':', ';'));
+    assert!(crate::harness::pin().is_some(), "this system has a pin");
+}
+
+#[test]
+fn the_token_command_is_quoted_for_each_shell() {
+    use crate::harness::token_command;
+    assert_eq!(token_command("/A B/lantern-engine", false), "'/A B/lantern-engine' october-token");
+    assert_eq!(token_command("/it's/lantern-engine", false), r"'/it'\''s/lantern-engine' october-token");
+    assert_eq!(
+        token_command(r"C:\Program Files\Lantern\lantern-engine.exe", true),
+        r#""C:\Program Files\Lantern\lantern-engine.exe" october-token"#
+    );
 }
 
 #[test]
@@ -1013,15 +1055,16 @@ fn the_bundled_harness_counts_as_installed() {
     let root = temp_dir("harness");
     assert!(bundled_in(&root).is_none());
     let version = crate::harness::pin().unwrap().version;
+    let target = crate::harness::Target::this();
     let dir = root.join("harness").join(&version);
     fs::create_dir_all(dir.join("node_modules/.bin")).unwrap();
-    fs::write(dir.join("node_modules/.bin/october"), "#!/usr/bin/env node\n").unwrap();
+    fs::write(target.harness_bin(&dir), "#!/usr/bin/env node\n").unwrap();
     assert!(bundled_in(&root).is_none(), "no Node.js recorded yet");
     let node_bin = root.join("node/bin");
     fs::write(dir.join("node-bin"), node_bin.to_string_lossy().as_bytes()).unwrap();
     assert!(bundled_in(&root).is_none(), "its Node.js is gone");
     fs::create_dir_all(&node_bin).unwrap();
-    fs::write(node_bin.join("node"), "").unwrap();
+    fs::write(target.node_exe(&node_bin), "").unwrap();
     let b = bundled_in(&root).unwrap();
     assert_eq!(b.node_bin, node_bin);
     assert!(b.bin.ends_with("node_modules/.bin/october"));

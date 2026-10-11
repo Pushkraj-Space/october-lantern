@@ -343,6 +343,8 @@ pub(crate) fn agent_argv(
     model: Option<&str>,
     bus: Option<&crate::bus::Attach>,
     program_override: Option<&Path>,
+    // Where a launch's own Node.js is (October Harness's), for npm shims that need it.
+    node_dir: Option<&Path>,
 ) -> Result<(PathBuf, Vec<String>)> {
     let name = program(kind);
     let found = match program_override {
@@ -358,8 +360,15 @@ pub(crate) fn agent_argv(
                 .map(|rel| found.parent().unwrap_or(Path::new(".")).join(rel))
                 .filter(|p| p.is_file())
                 .with_context(|| format!("{} is a batch file Lantern can't run safely; install {name}'s own .exe", found.display()))?;
-            let bundled = found.with_file_name("node.exe");
-            let node = if bundled.is_file() { bundled } else { crate::platform::find_on_path("node").context("Node.js isn't on PATH")? };
+            let beside = found.with_file_name("node.exe");
+            let own = node_dir.map(|dir| dir.join("node.exe")).filter(|node| node.is_file());
+            let node = if beside.is_file() {
+                beside
+            } else if let Some(own) = own {
+                own
+            } else {
+                crate::platform::find_on_path("node").context("Node.js isn't on PATH")?
+            };
             (node, vec![script.to_string_lossy().into_owned()])
         }
         _ => bail!("Lantern can't start {}", found.display()),
@@ -416,7 +425,8 @@ fn launch_session(
     deadline: Instant,
 ) -> Result<Launched> {
     let program_override = extra.program.as_deref().map(Path::new);
-    let (program, args) = agent_argv(kind, prompt, screenshot, model, bus.as_ref(), program_override)?;
+    let node_dir = extra.path_prefix.as_deref().map(Path::new);
+    let (program, args) = agent_argv(kind, prompt, screenshot, model, bus.as_ref(), program_override, node_dir)?;
     let project = cwd.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let safe: String = project.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(24).collect();
     let session = format!("{}-{}-{}", kind.as_str(), safe, now_ms() % 100_000);

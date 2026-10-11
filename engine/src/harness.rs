@@ -9,7 +9,7 @@
 //!   `~/Library/Application Support/October/runtime/` is used as it is (checked with
 //!   `node --version`); otherwise the pinned Node.js tarball for this Mac's chip is downloaded
 //!   from nodejs.org, checked against the SHA-256 in `harness.json`, and unpacked into
-//!   `runtime/node-v<ver>-darwin-<arch>/`.
+//!   `runtime/node-v<ver>-<os>-<arch>/` (nodejs.org's darwin/linux/win builds).
 //! - The harness: `npm install --ignore-scripts @october-dev/october@<ver>` into
 //!   `harness/<ver>/`, with that Node.js, and checked by running `october --version`.
 //!
@@ -45,7 +45,71 @@ pub struct Pin {
     pub node_sha256: String,
 }
 
-/// Reads `harness.json` for `arch` ("arm64" or "x86_64").
+/// Where Node.js and the harness live and what they're called, per system (nodejs.org's names).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Target {
+    /// "darwin", "linux" or "win".
+    pub os: &'static str,
+    /// "arm64" or "x64".
+    pub arch: &'static str,
+}
+
+impl Target {
+    pub fn this() -> Self {
+        let os = if cfg!(windows) {
+            "win"
+        } else if cfg!(target_os = "macos") {
+            "darwin"
+        } else {
+            "linux"
+        };
+        Self { os, arch: if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" } }
+    }
+    fn windows(self) -> bool {
+        self.os == "win"
+    }
+    /// The key in `harness.json` and in nodejs.org's file names: "linux-x64".
+    pub fn key(self) -> String {
+        format!("{}-{}", self.os, self.arch)
+    }
+    /// The archive nodejs.org ships for this system.
+    pub fn archive(self) -> &'static str {
+        match self.os {
+            "darwin" => "tar.gz",
+            "linux" => "tar.xz",
+            _ => "zip",
+        }
+    }
+    /// npm's name for the system, for packages' `os` lists.
+    pub fn npm_os(self) -> &'static str {
+        if self.windows() { "win32" } else { self.os }
+    }
+    /// Where `node` lives in an unpacked Node.js folder (`bin/` on macOS and Linux, the top on Windows).
+    pub fn node_bin(self, node_dir: &Path) -> PathBuf {
+        if self.windows() { node_dir.to_path_buf() } else { node_dir.join("bin") }
+    }
+    /// The Node.js folder a `node_bin` belongs to.
+    pub fn node_dir(self, node_bin: &Path) -> Option<PathBuf> {
+        if self.windows() { Some(node_bin.to_path_buf()) } else { node_bin.parent().map(Path::to_path_buf) }
+    }
+    pub fn node_exe(self, node_bin: &Path) -> PathBuf {
+        node_bin.join(if self.windows() { "node.exe" } else { "node" })
+    }
+    pub fn npm_cli(self, node_dir: &Path) -> PathBuf {
+        let lib = if self.windows() { node_dir.to_path_buf() } else { node_dir.join("lib") };
+        lib.join("node_modules").join("npm").join("bin").join("npm-cli.js")
+    }
+    /// The installed `october` program (npm's `.cmd` shim on Windows).
+    pub fn harness_bin(self, install: &Path) -> PathBuf {
+        install.join("node_modules").join(".bin").join(if self.windows() { "october.cmd" } else { "october" })
+    }
+    /// The separator in PATH lists.
+    pub fn path_separator(self) -> char {
+        if self.windows() { ';' } else { ':' }
+    }
+}
+
+/// Reads `harness.json` for a system and chip (`Target::key`, e.g. "linux-x64").
 pub(crate) fn parse_pin(json: &str, arch: &str) -> Option<Pin> {
     let v: Value = serde_json::from_str(json).ok()?;
     let node = &v["node"];
@@ -62,17 +126,8 @@ pub(crate) fn parse_pin(json: &str, arch: &str) -> Option<Pin> {
     (safe(&pin.version) && safe(&pin.node_version) && sha_ok && pin.node_url.starts_with("https://nodejs.org/dist/")).then_some(pin)
 }
 
-fn arch() -> &'static str {
-    if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" }
-}
-
-/// Node.js names x86_64 "x64".
-fn node_arch() -> &'static str {
-    if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" }
-}
-
 pub fn pin() -> Option<Pin> {
-    parse_pin(include_str!("../harness.json"), arch())
+    parse_pin(include_str!("../harness.json"), &Target::this().key())
 }
 
 /// "v24.21.0" or "24.21.0" (as `node --version` prints it).
@@ -101,9 +156,10 @@ const NODE_RECORD: &str = "node-bin";
 pub fn bundled_in(root: &Path) -> Option<Bundled> {
     let pin = pin()?;
     let dir = harness_dir(root, &pin.version);
-    let bin = dir.join("node_modules/.bin/october");
+    let target = Target::this();
+    let bin = target.harness_bin(&dir);
     let node_bin = PathBuf::from(std::fs::read_to_string(dir.join(NODE_RECORD)).ok()?.trim());
-    (bin.is_file() && node_bin.join("node").is_file()).then_some(Bundled { bin, node_bin, version: pin.version })
+    (bin.is_file() && target.node_exe(&node_bin).is_file()).then_some(Bundled { bin, node_bin, version: pin.version })
 }
 
 /// The bundled `october`, once installed (or `LANTERN_HARNESS_BIN`, for development: the Node.js
@@ -184,7 +240,7 @@ pub fn status(on_path: bool) -> Value {
 
 /// The installed Node.js version at `node_bin/node`, if it runs.
 fn node_version(node_bin: &Path) -> Option<(u32, u32, u32)> {
-    let out = crate::run::output(Command::new(node_bin.join("node")).arg("--version"), Duration::from_secs(10)).ok()?;
+    let out = crate::run::output(Command::new(Target::this().node_exe(node_bin)).arg("--version"), Duration::from_secs(10)).ok()?;
     if !out.status.success() {
         return None;
     }
@@ -193,15 +249,20 @@ fn node_version(node_bin: &Path) -> Option<(u32, u32, u32)> {
 
 /// A Node.js runtime folder that works here and is new enough, with npm.
 fn usable_node(dir: &Path, minimum: (u32, u32, u32)) -> Option<PathBuf> {
-    let bin = dir.join("bin");
-    let npm = dir.join("lib/node_modules/npm/bin/npm-cli.js");
+    let target = Target::this();
+    let bin = target.node_bin(dir);
+    let npm = target.npm_cli(dir);
     (npm.is_file() && node_version(&bin)? >= minimum).then_some(bin)
 }
 
-/// A compatible Node.js October Desktop already keeps, newest first.
+/// A compatible Node.js October Desktop already keeps, newest first (macOS; elsewhere Lantern
+/// downloads its own).
 fn desktop_node(minimum: (u32, u32, u32)) -> Option<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
     let runtime = crate::transcripts::home().join("Library/Application Support/October/runtime");
-    let suffix = format!("-darwin-{}", node_arch());
+    let suffix = format!("-{}", Target::this().key());
     let mut found: Vec<((u32, u32, u32), PathBuf)> = std::fs::read_dir(runtime)
         .ok()?
         .flatten()
@@ -224,7 +285,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// The pinned Node.js under `root/runtime`, downloaded and checked if it isn't there.
 fn download_node(root: &Path, pin: &Pin) -> Result<PathBuf> {
     let runtime = root.join("runtime");
-    let name = format!("node-v{}-darwin-{}", pin.node_version, node_arch());
+    let target = Target::this();
+    let name = format!("node-v{}-{}", pin.node_version, target.key());
     let dest = runtime.join(&name);
     if let Some(bin) = usable_node(&dest, pin.node_minimum) {
         return Ok(bin);
@@ -239,10 +301,15 @@ fn download_node(root: &Path, pin: &Pin) -> Result<PathBuf> {
     let work = runtime.join(format!(".node-{}", uuid::Uuid::new_v4().simple()));
     std::fs::create_dir_all(&work)?;
     let result = (|| -> Result<()> {
-        let archive = work.join("node.tar.gz");
+        let archive = work.join(format!("node.{}", target.archive()));
         std::fs::write(&archive, &bytes)?;
-        let out =
-            crate::run::output(Command::new("/usr/bin/tar").arg("-xzf").arg(&archive).arg("-C").arg(&work), Duration::from_secs(120))?;
+        // macOS's and Windows' own tar (bsdtar) read .tar.gz and .zip; GNU tar reads Linux's .tar.xz.
+        let (tar, flags) = match target.os {
+            "darwin" => ("/usr/bin/tar", "-xzf"),
+            "linux" => ("tar", "-xJf"),
+            _ => ("tar", "-xf"),
+        };
+        let out = crate::run::output(Command::new(tar).arg(flags).arg(&archive).arg("-C").arg(&work), Duration::from_secs(120))?;
         if !out.status.success() {
             bail!("couldn't unpack Node.js");
         }
@@ -259,16 +326,13 @@ fn download_node(root: &Path, pin: &Pin) -> Result<PathBuf> {
             let _ = std::fs::remove_dir_all(old.path());
         }
     }
-    usable_node(&dest, pin.node_minimum).context("the downloaded Node.js doesn't run on this Mac")
+    usable_node(&dest, pin.node_minimum).context("the downloaded Node.js doesn't run on this computer")
 }
 
 /// Installs the pinned harness under `root` (`support_dir()` in the app). `reuse_desktop`: use a
 /// compatible Node.js from October Desktop instead of downloading one.
 pub fn install_into(root: &Path, reuse_desktop: bool) -> Result<Bundled> {
-    // The pin and the install below are macOS's (darwin Node.js, /usr/bin/tar, ':' PATH lists).
-    if !cfg!(target_os = "macos") {
-        bail!("October Harness installs on macOS only for now. Install October's `october` command and Lantern will use it.");
-    }
+    let target = Target::this();
     let pin = pin().context("this build has no October Harness to install")?;
     if let Some(b) = bundled_in(root) {
         return Ok(b);
@@ -283,16 +347,18 @@ pub fn install_into(root: &Path, reuse_desktop: bool) -> Result<Bundled> {
     std::fs::create_dir_all(&work)?;
     let dest = harness_dir(root, &pin.version);
     let result = (|| -> Result<()> {
-        let npm_cli = node_bin.parent().context("no Node.js folder")?.join("lib/node_modules/npm/bin/npm-cli.js");
-        let path = format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", node_bin.display());
+        let npm_cli = target.npm_cli(&target.node_dir(&node_bin).context("no Node.js folder")?);
+        // Its Node.js first; then the system's basics (npm runs no install scripts here).
+        let system = if cfg!(windows) { std::env::var("PATH").unwrap_or_default() } else { "/usr/bin:/bin:/usr/sbin:/sbin".to_string() };
+        let path = format!("{}{}{system}", node_bin.display(), target.path_separator());
         let out = crate::run::output(
-            Command::new(node_bin.join("node"))
+            Command::new(target.node_exe(&node_bin))
                 .arg(npm_cli)
                 .args(["install", "--prefix"])
                 .arg(&work)
                 .args(["--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--loglevel=error"])
                 .arg(format!("{}@{}", pin.package, pin.version))
-                .env("PATH", path)
+                .env("PATH", &path)
                 .env("npm_config_cache", work.join(".npm-cache")),
             Duration::from_secs(300),
         )
@@ -304,13 +370,23 @@ pub fn install_into(root: &Path, reuse_desktop: bool) -> Result<Bundled> {
         }
         let _ = std::fs::remove_dir_all(work.join(".npm-cache"));
         // npm installs every platform's optional packages from the harness's shrinkwrap (about
-        // 300 MB of esbuild builds); only this Mac's can ever load.
-        prune_other_platforms(&work.join("node_modules"), 0);
-        let bin = work.join("node_modules/.bin/october");
+        // 300 MB of esbuild builds); only this system's can ever load.
+        prune_other_platforms(&work.join("node_modules"), 0, target);
+        let bin = target.harness_bin(&work);
         if !bin.is_file() {
             bail!("October Harness installed without its `october` program");
         }
-        let out = crate::run::output(Command::new(node_bin.join("node")).arg(&bin).arg("--version"), Duration::from_secs(30))?;
+        // npm's shim on Windows is a batch file: cmd runs it, with this Node.js first on PATH.
+        let mut check = if target.os == "win" {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C").arg(&bin).env("PATH", &path);
+            cmd
+        } else {
+            let mut cmd = Command::new(target.node_exe(&node_bin));
+            cmd.arg(&bin);
+            cmd
+        };
+        let out = crate::run::output(check.arg("--version"), Duration::from_secs(30))?;
         if !out.status.success() {
             bail!("the installed October Harness doesn't run");
         }
@@ -345,7 +421,7 @@ pub(crate) fn allows(list: &Value, value: &str) -> bool {
 }
 
 /// Removes packages under `node_modules` that are built for another OS or chip.
-fn prune_other_platforms(node_modules: &Path, depth: usize) {
+fn prune_other_platforms(node_modules: &Path, depth: usize, target: Target) {
     if depth > 8 {
         return;
     }
@@ -357,17 +433,17 @@ fn prune_other_platforms(node_modules: &Path, depth: usize) {
             continue;
         }
         if name.starts_with('@') {
-            prune_other_platforms(&path, depth + 1);
+            prune_other_platforms(&path, depth + 1, target);
             continue;
         }
         let manifest: Option<Value> = std::fs::read(path.join("package.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
         if let Some(m) = manifest
-            && (!allows(&m["os"], "darwin") || !allows(&m["cpu"], node_arch()))
+            && (!allows(&m["os"], target.npm_os()) || !allows(&m["cpu"], target.arch))
         {
             let _ = std::fs::remove_dir_all(&path);
             continue;
         }
-        prune_other_platforms(&path.join("node_modules"), depth + 1);
+        prune_other_platforms(&path.join("node_modules"), depth + 1, target);
     }
 }
 
@@ -397,17 +473,15 @@ fn write_token_file(session: Option<&(String, u64)>) {
         return;
     };
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     let _ = std::fs::create_dir_all(crate::hooks::support_dir());
     let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
     let body = serde_json::json!({"accessToken": token, "expiresAt": expires_at}).to_string();
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(body.as_bytes()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    // Only you can read it (Windows: the support folder is under your own profile).
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options.open(&tmp).and_then(|mut f| f.write_all(body.as_bytes()));
     if written.is_ok() {
         let _ = std::fs::rename(&tmp, &path);
     } else {
@@ -439,10 +513,15 @@ pub fn session_env() -> Vec<(String, String)> {
     if !env.is_empty()
         && let Ok(exe) = std::env::current_exe()
     {
-        let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', "'\\''"));
-        env.push(("OCTOBER_TOKEN_COMMAND".into(), format!("{quoted} october-token")));
+        env.push(("OCTOBER_TOKEN_COMMAND".into(), token_command(&exe.to_string_lossy(), cfg!(windows))));
     }
     env
+}
+
+/// The command the harness's shell runs for a fresh token: POSIX quoting, or cmd's double quotes
+/// on Windows (where a path can't contain `"`).
+pub(crate) fn token_command(exe: &str, windows: bool) -> String {
+    if windows { format!("\"{exe}\" october-token") } else { format!("'{}' october-token", exe.replace('\'', "'\\''")) }
 }
 
 pub(crate) fn env_for(session: Option<&(String, u64)>, now: u64) -> Vec<(String, String)> {
