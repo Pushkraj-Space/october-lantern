@@ -129,18 +129,10 @@ impl Lantern {
             }
             UiAction::GetOctober => self.open_url("https://www.october.dev"),
             UiAction::ReportProblem => {
-                let mut url = url::Url::parse("https://github.com/Pushkraj-Space/october-lantern/issues/new").expect("issue URL");
-                let system = crate::updates::system_name();
-                url.query_pairs_mut().append_pair("title", &format!("{system}: ")).append_pair(
-                    "body",
-                    &format!(
-                        "Lantern: {}\nOS: {system} {}\nDesktop: {}\n\nWhat happened:\n\nSteps to reproduce:\n",
-                        env!("CARGO_PKG_VERSION"),
-                        std::env::consts::ARCH,
-                        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()
-                    ),
-                );
-                self.open_url(url.as_str());
+                let url = problem_report(&self.model.agents);
+                if crate::os::open(&url).is_err() {
+                    self.show(format!("Write to {SUPPORT_EMAIL} about the problem."));
+                }
             }
             UiAction::Copy(text) => self.windows.copy(text),
             UiAction::Quit => self.windows.quit(),
@@ -238,5 +230,85 @@ mod log {
         if std::env::var_os("LANTERN_DEBUG").is_some() {
             eprintln!("lantern: not handled yet: {action:?}");
         }
+    }
+}
+
+/// Where problem reports go (Swift `Support.email`).
+const SUPPORT_EMAIL: &str = "hey@october.dev";
+
+/// Report a Problem (Swift `Support.reportProblem`): an email to the October team with the version,
+/// the system and a summary of the agents and terminals, never their conversations, folders or code.
+fn problem_report(agents: &[crate::model::Agent]) -> String {
+    let count = |labels: Vec<String>| {
+        let mut counts = std::collections::BTreeMap::<String, usize>::new();
+        for label in labels {
+            *counts.entry(label).or_default() += 1;
+        }
+        let joined: Vec<String> = counts.into_iter().map(|(label, n)| format!("{label} ×{n}")).collect();
+        if joined.is_empty() { "none".to_string() } else { joined.join(", ") }
+    };
+    let version = env!("CARGO_PKG_VERSION");
+    let kinds = count(agents.iter().map(|agent| agent.kind.display_name().to_string()).collect());
+    let terminals = count(
+        agents
+            .iter()
+            .map(|agent| {
+                let host = agent.host.as_ref().map_or("?", |host| host.app.as_str());
+                let via = agent.route.as_ref().map_or("none", |route| route.via.as_str());
+                format!("{host} via {via}")
+            })
+            .collect(),
+    );
+    let system = format!("{} {}", crate::updates::system_name(), std::env::consts::ARCH);
+    let body = format!(
+        "What happened, and what did you expect?\n\n\n---\nOctober Lantern {version}\n{system}\nAgents: {kinds}\nTerminals: {terminals}\n"
+    );
+    // Strict percent-encoding: mail apps read `+` in a mailto body literally.
+    let encode = |text: &str| {
+        text.bytes()
+            .map(|byte| match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (byte as char).to_string(),
+                _ => format!("%{byte:02X}"),
+            })
+            .collect::<String>()
+    };
+    format!("mailto:{SUPPORT_EMAIL}?subject={}&body={}", encode(&format!("October Lantern {version}: a problem")), encode(&body))
+}
+
+#[cfg(test)]
+mod report_tests {
+    use crate::model::{Agent, AgentKind, HostApp, Route};
+
+    #[test]
+    fn a_problem_report_is_an_email_with_counts_and_nothing_private() {
+        let agent = |kind: &str, app: &str, via: &str| Agent {
+            kind: AgentKind::new(kind),
+            cwd: Some("/home/me/secret-project".into()),
+            last_message: Some("private words".into()),
+            host: Some(HostApp { app: app.into(), ..Default::default() }),
+            route: Some(Route { via: via.into(), ..Default::default() }),
+            ..Default::default()
+        };
+        let url =
+            super::problem_report(&[agent("claude", "Ptyxis", "tmux"), agent("claude", "Ptyxis", "tmux"), agent("codex", "Code", "pty")]);
+        assert!(url.starts_with("mailto:hey@october.dev?subject=October%20Lantern%20"));
+        assert!(!url.contains('+') && !url.contains(' '));
+        let body = url.split("&body=").nth(1).unwrap();
+        let bytes = body.as_bytes();
+        let mut raw = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' {
+                raw.push(u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap(), 16).unwrap());
+                i += 3;
+            } else {
+                raw.push(bytes[i]);
+                i += 1;
+            }
+        }
+        let decoded = String::from_utf8(raw).unwrap();
+        assert!(decoded.contains("Agents: Claude Code ×2, Codex ×1"), "{decoded}");
+        assert!(decoded.contains("Terminals: Code via pty ×1, Ptyxis via tmux ×2"), "{decoded}");
+        assert!(!decoded.contains("secret-project") && !decoded.contains("private words"));
     }
 }

@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 const REPO: &str = match option_env!("LANTERN_RELEASES_REPO") {
     Some(repo) => repo,
-    None => "Pushkraj-Space/october-lantern",
+    // Release builds name the repository that published them (the release workflows set it).
+    None => "october-dev/october-lantern",
 };
 #[cfg(not(windows))]
 const FILES: &[&str] = &[
