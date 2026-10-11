@@ -9,11 +9,31 @@ use crate::model::{Agent, Kind, QuestionKind, Route, State, StateSource};
 use crate::procs::Proc;
 use crate::{deliver, history, hooks, scanner, transcripts};
 
-fn temp_dir(name: &str) -> PathBuf {
+/// A folder under the system temp dir, removed when the test ends (even when it fails): tests
+/// that point HOME here install hooks, which copies the engine binary in.
+struct TempDir(PathBuf);
+impl std::ops::Deref for TempDir {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir(name: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!("lantern-test-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    dir
+    TempDir(dir)
 }
 
 #[cfg(windows)]
@@ -140,7 +160,7 @@ fn codex_code_mode_tool_calls() {
 #[test]
 fn hooks_install_uninstall_and_missing_app() {
     let home = temp_dir("home");
-    unsafe { std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &home) };
+    unsafe { std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &*home) };
     fs::create_dir_all(home.join(".claude")).unwrap();
     fs::create_dir_all(home.join(".codex")).unwrap();
     let theirs = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]},"model":"opus"}"#;
@@ -1014,4 +1034,22 @@ fn launched_agents_are_asked_for_full_paths() {
     let m = crate::launch::with_guidance("find my passport".into(), std::path::Path::new("/Users/me"));
     assert!(m.starts_with("find my passport"));
     assert!(m.contains("You're in /Users/me") && m.contains("full absolute path"));
+}
+
+/// The note names the computer the agent is on, never "the Mac" elsewhere, and keeps the prefix
+/// the apps hide in the conversation.
+#[test]
+fn launch_guidance_fits_each_platform() {
+    use crate::launch::guidance_for;
+    let mac = guidance_for("macos", "hi".into(), std::path::Path::new("/Users/me"));
+    assert!(mac.contains("on macOS.") && mac.contains("/Users/name/") && mac.contains("mdfind"));
+    let linux = guidance_for("linux", "hi".into(), std::path::Path::new("/home/me"));
+    assert!(linux.contains("on Linux.") && linux.contains("/home/name/") && linux.contains("locate"));
+    assert!(!linux.contains("Mac") && !linux.contains("mdfind"));
+    let windows = guidance_for("windows", "hi".into(), std::path::Path::new(r"C:\Users\me"));
+    assert!(windows.contains("on Windows.") && windows.contains(r"C:\Users\name\Documents") && windows.contains("Get-ChildItem"));
+    assert!(!windows.contains("Mac"));
+    for note in [mac, linux, windows] {
+        assert!(note.starts_with("hi\n\n(Started from October Lantern"));
+    }
 }
