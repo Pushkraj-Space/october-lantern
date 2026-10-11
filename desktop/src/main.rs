@@ -5,6 +5,7 @@ mod account;
 mod app;
 mod legacy_ui;
 mod model;
+mod october_ai;
 mod os;
 mod settings;
 mod shell;
@@ -563,6 +564,8 @@ impl Lantern {
                 self.ask_answer.push_str(&text);
             }
             Event::AskDelta { .. } => {}
+            // The new app's (--shell) Ask Lantern; the legacy window doesn't use it.
+            Event::Assistant { .. } | Event::AssistantDone { .. } => {}
             Event::Update(result) => {
                 self.update_pending = false;
                 match result {

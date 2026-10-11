@@ -22,18 +22,47 @@ mod shell_x11;
 
 pub enum Event {
     Status(String),
-    Screenshot { owner: String, generation: u64, result: Result<std::path::PathBuf, String> },
+    Screenshot {
+        owner: String,
+        generation: u64,
+        result: Result<std::path::PathBuf, String>,
+    },
     Folder(Result<std::path::PathBuf, String>),
-    Transcript { owner: String, generation: u64, result: Result<String, String> },
+    Transcript {
+        owner: String,
+        generation: u64,
+        result: Result<String, String>,
+    },
     Activate(String),
     Compact,
     Quit,
     Tray(bool),
     Shortcuts(bool),
-    Account { generation: u64, result: Result<crate::account::Session, String> },
-    Ask { generation: u64, result: Result<String, String> },
-    AskDelta { generation: u64, text: String },
+    Account {
+        generation: u64,
+        result: Result<crate::account::Session, String>,
+    },
+    Ask {
+        generation: u64,
+        result: Result<String, String>,
+    },
+    AskDelta {
+        generation: u64,
+        text: String,
+    },
     Update(Result<crate::updates::Release, String>),
+    /// A piece of an Ask Lantern answer, for the question `generation` and its `turn`.
+    Assistant {
+        generation: u64,
+        turn: u64,
+        piece: crate::october_ai::Piece,
+    },
+    /// The answer finished; `error` is what to show instead when it failed.
+    AssistantDone {
+        generation: u64,
+        turn: u64,
+        error: Option<String>,
+    },
 }
 // Wake/map the native window before waiting for another frame. A hidden Wayland window may
 // receive no frame callbacks; a repaint request alone cannot reliably activate it from the tray.

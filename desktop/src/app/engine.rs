@@ -34,6 +34,21 @@ impl Lantern {
                 if let Ok(harness) = serde_json::from_value::<HarnessStatus>(event["harness"].clone()) {
                     self.model.harness = Some(harness);
                 }
+                // Without Claude Code or Codex, October Harness is what can run: install it once,
+                // in the background (Swift `installHarnessIfNoOtherAgent`).
+                let status = self.model.harness.as_ref().map(|h| h.status);
+                let october = self.model.new_session.installed.iter().flatten().any(|k| k.as_str() == crate::model::AgentKind::OCTOBER);
+                if self.needs_harness()
+                    && !october
+                    && !matches!(
+                        status,
+                        Some(
+                            crate::model::HarnessState::Ready | crate::model::HarnessState::Installing | crate::model::HarnessState::Failed
+                        )
+                    )
+                {
+                    self.request(serde_json::json!({"type": "harness.prepare"}));
+                }
             }
             "harness" => {
                 if let Ok(harness) = serde_json::from_value::<HarnessStatus>(event.clone()) {

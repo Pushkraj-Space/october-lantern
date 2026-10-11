@@ -21,6 +21,7 @@ pub(crate) fn uptime() -> f64 {
 }
 
 mod apply;
+mod assistant;
 mod engine;
 pub mod fixture;
 mod session;
@@ -71,6 +72,13 @@ pub struct Lantern {
     toast_until: Option<Instant>,
     actions: Vec<UiAction>,
     launching: session::Launching,
+    asking: assistant::Asking,
+    /// The October account, once signed in (its access token asks October's AI).
+    session: Option<crate::account::Session>,
+    /// Sign-in attempts: a newer one (or signing out) makes older results stale.
+    auth: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The system keyring's sign-in store.
+    vault: Option<Sender<crate::account::VaultCommand>>,
     /// An action to run once the engine has said which agents are installed (`--new-session`, the
     /// tray, a hotkey).
     on_ready: Option<UiAction>,
@@ -106,6 +114,10 @@ impl Lantern {
             toast_until: None,
             actions: Vec::new(),
             launching: session::Launching::default(),
+            asking: assistant::Asking::default(),
+            session: None,
+            auth: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            vault: None,
             on_ready: None,
             tx,
             events,
@@ -140,8 +152,86 @@ impl Lantern {
                 }
             }
             Event::Status(text) => self.show(text),
+            Event::Assistant { generation, turn, piece } => self.assistant_piece(generation, turn, piece),
+            Event::AssistantDone { generation, turn, error } => self.assistant_done(generation, turn, error),
+            Event::Account { generation, result } if generation == self.auth.load(std::sync::atomic::Ordering::SeqCst) => {
+                self.model.account.pending = false;
+                trace!(
+                    "account: {}",
+                    match &result {
+                        Ok(session) => format!("signed in, plan {:?}", session.plan["plan"].as_str().or(session.plan["tier"].as_str())),
+                        Err(error) => format!("not signed in ({error})"),
+                    }
+                );
+                match result {
+                    Ok(session) => {
+                        let plan = session.plan["plan"].as_str().or(session.plan["tier"].as_str()).map(str::to_string);
+                        self.model.account.signed_in = Some(crate::model::Account { email: session.email.clone(), plan });
+                        self.model.account.error = None;
+                        self.session = Some(session);
+                    }
+                    Err(error) => {
+                        self.session = None;
+                        self.model.account.signed_in = None;
+                        self.model.account.error = Some(error);
+                    }
+                }
+            }
             _ => {}
         }
+    }
+
+    /// Restores the October sign-in kept in the system keyring, and keeps it fresh.
+    fn restore_account(&mut self) {
+        let generation = self.auth.load(std::sync::atomic::Ordering::SeqCst);
+        self.account_flow(generation).start(crate::account::restore);
+    }
+
+    /// A sign-in that runs (and refreshes itself) off the frame loop; newer attempts make it stale.
+    fn account_flow(&mut self, generation: u64) -> crate::account::Flow {
+        let vault = self.vault.get_or_insert_with(|| crate::account::vault(self.tx.clone())).clone();
+        crate::account::Flow {
+            generation,
+            current: self.auth.clone(),
+            engine: self.engine.sender(),
+            vault,
+            remember: true,
+            events: self.tx.clone(),
+        }
+    }
+
+    /// Starts a sign-in (browser or email); its result arrives as `Event::Account`.
+    fn sign_in(
+        &mut self,
+        work: impl FnOnce(u64, std::sync::Arc<std::sync::atomic::AtomicU64>) -> Result<crate::account::Session> + Send + 'static,
+    ) {
+        let generation = self.auth.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let current = self.auth.clone();
+        self.model.account.pending = true;
+        self.model.account.error = None;
+        self.account_flow(generation).start(move || work(generation, current));
+    }
+
+    fn cancel_sign_in(&mut self) {
+        self.auth.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.model.account.pending = false;
+    }
+
+    /// Signs out: forgets the keyring sign-in, tells the engine (phone and October sessions stop),
+    /// and ends Ask Lantern's conversation.
+    fn sign_out(&mut self) {
+        let generation = self.auth.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if let Some(session) = self.session.take() {
+            std::thread::spawn(move || crate::account::logout(session.access));
+        }
+        let vault = self.vault.clone();
+        let _ = self.engine.sender().credentials(generation, &self.auth, None, || {
+            if let Some(vault) = vault {
+                let _ = vault.send(crate::account::VaultCommand::Clear);
+            }
+        });
+        self.model.account = Default::default();
+        self.clear_assistant();
     }
 
     /// Sends a request to the engine with a fresh id; `None` when the engine isn't there.
@@ -184,6 +274,7 @@ impl Lantern {
             self.refresh_chat();
         }
         self.launch_tick();
+        self.assistant_tick();
     }
 }
 
@@ -253,6 +344,7 @@ pub fn run(terminal: &str, start: Option<UiAction>) -> Result<()> {
             crate::ui::theme::install(&cc.egui_ctx);
             let mut lantern = Lantern::new(engine, Some(cc.egui_ctx.clone()));
             lantern.on_ready = start;
+            lantern.restore_account();
             Ok(Box::new(lantern))
         }),
     )

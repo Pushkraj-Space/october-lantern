@@ -33,18 +33,35 @@ impl EngineSender {
     }
     // Serialize token writes and vault commands with sign-out. Check the epoch AFTER taking the
     // input lock: a late network response must never restore credentials after sign-out.
-    pub fn credentials(&self, generation: u64, current: &AtomicU64, access: Option<&str>, after: impl FnOnce()) -> Result<bool> {
+    /// `access`: the October access token and when it expires, or `None` after sign-out. The
+    /// engine gets it for the phone and for October Harness sessions (`october.session`).
+    pub fn credentials(
+        &self,
+        generation: u64,
+        current: &AtomicU64,
+        access: Option<(&str, std::time::Instant)>,
+        after: impl FnOnce(),
+    ) -> Result<bool> {
         let mut input = self.input.lock().map_err(|_| anyhow::anyhow!("engine input unavailable"))?;
         if current.load(Ordering::SeqCst) != generation {
             return Ok(false);
         }
         after();
         anyhow::ensure!(self.compatible.load(Ordering::SeqCst), "engine handshake unavailable");
-        let request = match access {
-            Some(access) => serde_json::json!({"type":"phone.token","accessToken":access}),
-            None => serde_json::json!({"type":"phone.stop"}),
+        let requests = match access {
+            Some((access, expires)) => {
+                let left = expires.saturating_duration_since(std::time::Instant::now());
+                let expires_at = (std::time::SystemTime::now() + left).duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+                [
+                    serde_json::json!({"type":"phone.token","accessToken":access}),
+                    serde_json::json!({"type":"october.session","accessToken":access,"expiresAt":expires_at}),
+                ]
+            }
+            None => [serde_json::json!({"type":"phone.stop"}), serde_json::json!({"type":"october.session"})],
         };
-        writeln!(input, "{request}")?;
+        for request in requests {
+            writeln!(input, "{request}")?;
+        }
         input.flush()?;
         Ok(true)
     }
@@ -272,20 +289,38 @@ mod tests {
         engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
         let sender = engine.sender();
         let current = AtomicU64::new(2);
-        assert!(!sender.credentials(1, &current, Some("stale"), || panic!("stale vault write")).unwrap());
+        assert!(!sender.credentials(1, &current, Some(("stale", std::time::Instant::now())), || panic!("stale vault write")).unwrap());
         let mut cleared = false;
         assert!(sender.credentials(2, &current, None, || cleared = true).unwrap());
         assert!(cleared);
         let event = engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
         assert_eq!(event["type"], "phone.stop");
         assert!(event.get("accessToken").is_none());
+        let event = engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        assert_eq!(event["type"], "october.session");
+        assert!(event.get("accessToken").is_none(), "signing out clears October Harness's sign-in too");
+    }
+    #[test]
+    fn sign_in_gives_the_engine_the_phone_and_october_tokens() {
+        let mut engine = echo();
+        engine.send(&json!({"type":"hello","protocol":3})).unwrap();
+        engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        let expires = std::time::Instant::now() + Duration::from_secs(3600);
+        assert!(engine.sender().credentials(1, &AtomicU64::new(1), Some(("tok", expires)), || {}).unwrap());
+        let phone = engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        assert_eq!((phone["type"].as_str(), phone["accessToken"].as_str()), (Some("phone.token"), Some("tok")));
+        let october = engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        assert_eq!((october["type"].as_str(), october["accessToken"].as_str()), (Some("october.session"), Some("tok")));
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let at = october["expiresAt"].as_u64().unwrap();
+        assert!((now + 3590..=now + 3610).contains(&at), "expiresAt is epoch seconds");
     }
     #[test]
     fn credentials_require_a_matching_protocol() {
         let mut engine = echo();
         engine.send(&json!({"type":"hello","protocol":99})).unwrap();
         engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
-        assert!(engine.sender().credentials(1, &AtomicU64::new(1), Some("test"), || {}).is_err());
+        assert!(engine.sender().credentials(1, &AtomicU64::new(1), Some(("test", std::time::Instant::now())), || {}).is_err());
         engine.send(&json!({"type":"marker"})).unwrap();
         assert_eq!(engine.events.recv_timeout(Duration::from_secs(10)).unwrap().unwrap()["type"], "marker");
     }

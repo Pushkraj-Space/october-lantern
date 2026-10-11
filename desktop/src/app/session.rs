@@ -110,10 +110,10 @@ impl Lantern {
     }
 
     /// Starts an agent. In Lantern, its conversation shows right away and the real one replaces it
-    /// once the agent is up.
-    pub(super) fn launch(&mut self, request: SessionRequest) {
+    /// once the agent is up. False when another launch is still under way.
+    pub(super) fn launch(&mut self, request: SessionRequest) -> bool {
         if self.model.new_session.launching || self.pending.values().any(|p| matches!(p, Pending::Launch)) {
-            return;
+            return false;
         }
         if request.background {
             // §9.1: the list first (that closes any chat), then the preview.
@@ -142,7 +142,7 @@ impl Lantern {
                 self.request(json!({"type": "harness.prepare"}));
             }
             self.launching.after_harness = Some(request);
-            return;
+            return true;
         }
         self.remember_launch(&request);
         let context = request.context.as_ref().map(|context| context.summary(self.model.caps.platform));
@@ -159,6 +159,7 @@ impl Lantern {
             }
             None => self.launch_failed("Lantern's engine isn't running.".into()),
         }
+        true
     }
 
     /// Task folder per app, last model per agent, recent folders and agents.
@@ -212,6 +213,7 @@ impl Lantern {
     }
 
     fn launch_failed(&mut self, message: String) {
+        self.assistant_launch_finished(Some(&message));
         self.model.new_session.launching = false;
         self.model.new_session.launch_error = Some(message.clone());
         if let Some(preview) = &mut self.model.launch_preview {
@@ -225,6 +227,7 @@ impl Lantern {
         if !ok {
             return self.launch_failed(message.unwrap_or_else(|| "unknown error".into()));
         }
+        self.assistant_launch_finished(None);
         if let Some(session) = session.filter(|_| !self.launching.preview_closed) {
             self.launching.open_when_seen = Some((session, Instant::now() + PREVIEW_WAIT));
             self.open_launched();

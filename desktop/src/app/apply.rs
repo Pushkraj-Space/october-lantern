@@ -61,7 +61,26 @@ impl Lantern {
                     self.open_url(url);
                 }
             }
-            UiAction::Launch(request) => self.launch(*request),
+            UiAction::Launch(request) => {
+                self.launch(*request);
+            }
+            UiAction::SignInProvider(provider) => {
+                let provider = match provider {
+                    crate::ui::Provider::Google => "google",
+                    crate::ui::Provider::GitHub => "github",
+                    crate::ui::Provider::Apple => "apple",
+                };
+                self.sign_in(move |generation, current| crate::account::oauth(provider, generation, current));
+            }
+            UiAction::SignInEmail { email, password } => {
+                self.sign_in(move |_, _| crate::account::password(email.trim().to_string(), password));
+            }
+            UiAction::CancelSignIn => self.cancel_sign_in(),
+            UiAction::SignOut => self.sign_out(),
+            UiAction::SubmitAssistant => self.submit_assistant(),
+            UiAction::ClearAssistant => self.clear_assistant(),
+            UiAction::CancelAssistantTask => self.cancel_assistant_task(),
+            UiAction::StartAssistantTaskNow => self.start_pending_task(),
             UiAction::CloseLaunchPreview => self.close_preview(),
             UiAction::RetryPreviewInTerminal => self.retry_preview_in_terminal(),
             UiAction::OpenUrl(url) => self.open_url(&url),

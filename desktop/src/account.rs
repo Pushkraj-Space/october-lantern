@@ -36,7 +36,7 @@ impl Flow {
         self.current.load(Ordering::SeqCst) == self.generation
     }
     fn publish(&self, session: &Session) -> bool {
-        let result = self.engine.credentials(self.generation, &self.current, Some(&session.access), || {
+        let result = self.engine.credentials(self.generation, &self.current, Some((&session.access, session.expires)), || {
             if self.remember {
                 let _ = self.vault.send(VaultCommand::Store(session.refresh.clone()));
             } else {
@@ -351,6 +351,10 @@ mod tests {
             let token = engine.events.recv_timeout(Duration::from_secs(3)).unwrap().unwrap();
             assert_eq!(token["type"], "phone.token");
             assert_eq!(token["accessToken"], access);
+            // October Harness sessions get the same (refreshed) token.
+            let october = engine.events.recv_timeout(Duration::from_secs(3)).unwrap().unwrap();
+            assert_eq!(october["type"], "october.session");
+            assert_eq!(october["accessToken"], access);
             assert!(
                 matches!(vault_rx.recv_timeout(Duration::from_secs(3)).unwrap(),VaultCommand::Store(token) if token == format!("refresh-{access}"))
             );
