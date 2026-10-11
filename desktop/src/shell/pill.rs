@@ -3,7 +3,7 @@
 //! Metrics from PillView.swift: padding 6, lantern 34 (+2), sections 8 apart, actions 32 square
 //! and 6 apart, a 22x1 divider with 2 below; 50 x 50 collapsed, 50 x 213 expanded.
 use crate::model::{EngineHealth, Model, PanelMode};
-use crate::ui::components::paint_glass;
+use crate::ui::components::{material_tint, paint_glass};
 use crate::ui::icons::{Icon, paint_icon};
 use crate::ui::{Assets, UiAction, theme};
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
@@ -11,7 +11,8 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Strok
 const PAD: f32 = 6.0;
 const LANTERN: f32 = 38.0;
 const ICON: f32 = 32.0;
-/// GlassContainer tint for the pill (Windows.swift).
+/// GlassContainer tint for the pill (Windows.swift). Without backdrop blur the glass is denser
+/// (`material_tint`), so the wallpaper behind doesn't show through sharp.
 const TINT: f32 = 0.45;
 
 /// What the person did with the lantern this frame (the window moves with drags).
@@ -37,7 +38,7 @@ pub fn help_font() -> egui::FontId {
 pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, out: &mut Vec<UiAction>) -> PillInput {
     let rect = ui.max_rect();
     let painter = ui.painter().clone();
-    paint_glass(&painter, rect, rect.width() / 2.0, TINT);
+    paint_glass(&painter, rect, rect.width() / 2.0, material_tint(TINT, model.caps.backdrop_blur));
 
     let lantern = Rect::from_min_size(rect.min + vec2(PAD, PAD), vec2(LANTERN, LANTERN));
     let response = ui.interact(lantern, ui.id().with("lantern"), Sense::click_and_drag());
@@ -157,5 +158,42 @@ fn lantern_button(painter: &egui::Painter, rect: Rect, model: &Model, assets: &A
         painter.rect_filled(badge, CornerRadius::same(9), theme::AMBER);
         painter.rect_stroke(badge, CornerRadius::same(9), Stroke::new(1.0, theme::black(0.5)), StrokeKind::Outside);
         painter.galley(Align2::CENTER_CENTER.align_size_within_rect(galley.size(), badge).min, galley, Color32::BLACK);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pill's glass fill alpha, with and without the platform's backdrop blur.
+    fn glass_alpha(backdrop_blur: bool) -> u8 {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let assets = Assets::load(&ctx);
+        let mut model = Model::default();
+        model.caps.backdrop_blur = backdrop_blur;
+        let mut output = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(50.0, 50.0))), ..Default::default() },
+            |ui| {
+                show(ui, &model, &assets, false, &mut Vec::new());
+            },
+        );
+        output.textures_delta.clear();
+        let first = output.shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Vec(layers) => match layers.first() {
+                Some(egui::Shape::Rect(fill)) => Some(fill.fill.a()),
+                _ => None,
+            },
+            _ => None,
+        });
+        first.expect("the pill paints its glass first")
+    }
+
+    #[test]
+    fn without_backdrop_blur_the_pill_glass_is_denser() {
+        // Swift's 0.45 GlassContainer tint plus glassSurface's 0.35 black: 0.6425 with real blur;
+        // at least 0.85 without it, so a sharp wallpaper doesn't show through.
+        assert_eq!(glass_alpha(true), (0.6425_f32 * 255.0).round() as u8);
+        assert!(glass_alpha(false) >= 216, "{}", glass_alpha(false));
     }
 }
