@@ -97,7 +97,7 @@ impl Lantern {
             UiAction::StartPointAsk => self.start_point_ask(),
             UiAction::ReselectPointAsk => self.reselect_point_ask(),
             UiAction::CancelPointAsk => self.cancel_point_ask(),
-            UiAction::ChoosePointAskRecipient(agent_id) => self.model.point_ask.recipient = Some(agent_id),
+            UiAction::ChoosePointAskRecipient(agent_id) => self.choose_point_recipient(agent_id),
             UiAction::SubmitPointAsk => self.submit_point_ask(),
             UiAction::SendPointAskToAgent => self.send_point(),
             UiAction::CopyPointAskAnswer => self.copy_point_ask_answer(),

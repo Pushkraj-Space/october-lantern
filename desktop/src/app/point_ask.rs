@@ -12,6 +12,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+/// Shown when Send's pinned recipient has exited (CONTRACT §9.4).
+const RECIPIENT_EXITED: &str = "That agent has exited. Choose another.";
+
 /// From the pill: Lantern's panel fades before the screen dims.
 const PANEL_FADE: Duration = Duration::from_millis(150);
 
@@ -233,11 +236,20 @@ impl Lantern {
 
     /// Hands the selection to the agent: the screenshot saved in its project (ignored by Git),
     /// your words, where it is, and October's answer if there was one.
+    /// Choosing who Send goes to. A recipient that resolves clears only the "exited" problem;
+    /// capture, permission and October errors stay.
+    pub(super) fn choose_point_recipient(&mut self, agent_id: String) {
+        if self.model.agent(&agent_id).is_some() && self.model.point_ask.problem.as_deref() == Some(RECIPIENT_EXITED) {
+            self.model.point_ask.problem = None;
+        }
+        self.model.point_ask.recipient = Some(agent_id);
+    }
+
     pub(super) fn send_point(&mut self) {
         let Some(pinned) = self.model.point_ask.recipient.clone() else { return };
         // The pinned agent stays pinned when it exits (CONTRACT §9.4): say so, never retarget.
         let Some(agent) = self.model.agent(&pinned).cloned() else {
-            self.model.point_ask.problem = Some("That agent has exited. Choose another.".into());
+            self.model.point_ask.problem = Some(RECIPIENT_EXITED.into());
             return;
         };
         if !self.can_send_selection() {
@@ -475,10 +487,21 @@ mod tests {
         lantern.model.point_ask.recipient = Some("gone".into());
         lantern.inputs.point_ask = "Fix this".into();
         lantern.send_point();
-        assert_eq!(lantern.model.point_ask.problem.as_deref(), Some("That agent has exited. Choose another."));
+        assert_eq!(lantern.model.point_ask.problem.as_deref(), Some(RECIPIENT_EXITED));
         assert_eq!(lantern.model.point_ask.recipient.as_deref(), Some("gone"));
         assert_eq!(lantern.inputs.point_ask, "Fix this");
         assert!(!lantern.model.point_ask.sending);
+        // Choosing an agent that's gone too changes nothing visible; a live one clears the note.
+        lantern.choose_point_recipient("also-gone".into());
+        assert_eq!(lantern.model.point_ask.problem.as_deref(), Some(RECIPIENT_EXITED));
+        lantern.model.agents.push(Agent { id: "live".into(), ..Default::default() });
+        lantern.choose_point_recipient("live".into());
+        assert_eq!(lantern.model.point_ask.problem, None);
+        assert_eq!(lantern.model.point_ask.recipient.as_deref(), Some("live"));
+        // Other problems are not the chooser's to clear.
+        lantern.model.point_ask.problem = Some("Couldn't take the screenshot: denied".into());
+        lantern.choose_point_recipient("live".into());
+        assert_eq!(lantern.model.point_ask.problem.as_deref(), Some("Couldn't take the screenshot: denied"));
     }
 
     #[test]
