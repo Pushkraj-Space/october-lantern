@@ -2,8 +2,12 @@
 // Release builds on Windows are windowed apps: no console window behind Lantern.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod account;
+mod app;
+mod legacy_ui;
+mod model;
 mod os;
 mod settings;
+mod shell;
 mod sidecar;
 mod state;
 mod ui;
@@ -950,9 +954,21 @@ fn main() -> anyhow::Result<()> {
         println!("Sidecar connected: protocol {}, engine {}", event["protocol"], event["version"]);
         return Ok(());
     }
+    if let Some(index) = args.iter().position(|arg| arg == "--fixture") {
+        let fixture = args.get(index + 1).ok_or_else(|| anyhow::anyhow!("--fixture requires a JSON path"))?;
+        let out = match args.iter().position(|arg| arg == "--out") {
+            Some(index) => PathBuf::from(args.get(index + 1).ok_or_else(|| anyhow::anyhow!("--out requires a PNG path"))?),
+            None => PathBuf::from(fixture).with_extension("png"),
+        };
+        let scale = match args.iter().position(|arg| arg == "--scale") {
+            Some(index) => args.get(index + 1).ok_or_else(|| anyhow::anyhow!("--scale requires 1 or 2"))?.parse()?,
+            None => 1.0,
+        };
+        return app::fixture::run(std::path::Path::new(fixture), out, scale);
+    }
     if args.iter().any(|arg| arg == "--help") {
         println!(
-            "October Lantern\n--check-sidecar   Verify the Rust engine\n--check-desktop   Verify desktop portals\n--install-launcher   Install the application launcher\n--snapshot FILE   Render a preview\n--settings | --connections | --ask | --help-page | --welcome | --new-session | --compact"
+            "October Lantern\n--check-sidecar   Verify the Rust engine\n--check-desktop   Verify desktop portals\n--install-launcher   Install the application launcher\n--snapshot FILE   Render a preview\n--fixture FILE.json [--out FILE.png] [--scale 1|2]   Render one surface from a saved model\n--settings | --connections | --ask | --help-page | --welcome | --new-session | --compact"
         );
         return Ok(());
     }
