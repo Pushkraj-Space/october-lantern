@@ -78,6 +78,7 @@ impl Lantern {
                 }
             }
             "october" => self.model.october = serde_json::from_value::<OctoberLink>(event["october"].clone()).ok(),
+            "toolkit" => self.toolkit_result(&event),
             _ => {}
         }
     }

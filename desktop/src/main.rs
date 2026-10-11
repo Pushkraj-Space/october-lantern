@@ -569,7 +569,8 @@ impl Lantern {
             | Event::AssistantDone { .. }
             | Event::PointAsk { .. }
             | Event::PointAskDone { .. }
-            | Event::PointAskSent { .. } => {}
+            | Event::PointAskSent { .. }
+            | Event::Hooks(_) => {}
             Event::Update(result) => {
                 self.update_pending = false;
                 match result {

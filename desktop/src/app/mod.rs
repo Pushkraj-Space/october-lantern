@@ -28,6 +28,7 @@ mod engine;
 pub mod fixture;
 mod menu;
 mod point_ask;
+mod preferences;
 mod select;
 mod session;
 mod shots;
@@ -84,6 +85,7 @@ pub struct Lantern {
     launching: session::Launching,
     asking: assistant::Asking,
     pointing: point_ask::Pointing,
+    upkeep: preferences::Upkeep,
     /// A tray host shows Lantern's status menu (GNOME needs the AppIndicator extension).
     tray: bool,
     /// The October account, once signed in (its access token asks October's AI).
@@ -130,6 +132,7 @@ impl Lantern {
             asking: assistant::Asking::default(),
             pointing: point_ask::Pointing::default(),
             tray: false,
+            upkeep: preferences::Upkeep::default(),
             session: None,
             auth: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
             vault: None,
@@ -178,6 +181,8 @@ impl Lantern {
             Event::Quit => self.windows.quit(),
             Event::Shortcuts(available) => self.model.caps.global_hotkeys = available,
             Event::Tray(available) => self.tray = available,
+            Event::Hooks(result) => self.hooks_result(result),
+            Event::Update(result) => self.update_result(result),
             Event::Assistant { generation, turn, piece } => self.assistant_piece(generation, turn, piece),
             Event::AssistantDone { generation, turn, error } => self.assistant_done(generation, turn, error),
             Event::Account { generation, result } if generation == self.auth.load(std::sync::atomic::Ordering::SeqCst) => {
@@ -302,6 +307,7 @@ impl Lantern {
         self.launch_tick();
         self.assistant_tick();
         self.point_ask_tick();
+        self.upkeep_tick();
         self.publish_tray_menu();
     }
 }
@@ -375,6 +381,7 @@ pub fn run(terminal: &str, start: Option<UiAction>) -> Result<()> {
             lantern.restore_account();
             lantern.first_launch();
             lantern.start_desktop();
+            lantern.refresh_hooks();
             Ok(Box::new(lantern))
         }),
     )

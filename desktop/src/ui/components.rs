@@ -78,6 +78,12 @@ pub fn plain_button(ui: &mut Ui, title: &str, size: f32, weight: Weight, color: 
     response
 }
 
+/// egui horizontal rows start at its minimum widget height. Reserve the measured full height
+/// before placing the first child, so an early spinner is centered beside later multiline text.
+pub fn centered_row<R>(ui: &mut Ui, height: f32, draw: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), height), egui::Layout::left_to_right(egui::Align::Center), draw)
+}
+
 /// WelcomeView.swift's shared button styles (also used by AccountCard and DesktopCard).
 pub fn secondary_button(ui: &mut Ui, title: &str) -> Response {
     styled_button(ui, title, false)
@@ -480,6 +486,28 @@ mod tests {
         assert_eq!(time_ago(None, 1000.0), "");
         assert_eq!(time_ago(Some(2000.0), 1000.0), "now");
         assert_eq!(time_ago(Some(0.0), 3600000.0), "1h");
+    }
+
+    #[test]
+    fn measured_rows_center_an_early_spinner_with_multiline_text_and_a_later_button() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut centers = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(380.0, 100.0))), ..Default::default() },
+            |ui| {
+                centered_row(ui, 60.0, |ui| {
+                    let spinner = spinner(ui, 12.0, theme::MUTED, &super::super::Env::default());
+                    let text = label(ui, "First line\nSecond line\nThird line", 12.0, Weight::Regular, theme::INK);
+                    let button = plain_button(ui, "Cancel", 11.5, Weight::Semibold, theme::MUTED);
+                    centers = Some((spinner.rect.center().y, text.rect.center().y, button.rect.center().y));
+                });
+            },
+        );
+        output.textures_delta.clear();
+        let (spinner, text, button) = centers.unwrap();
+        assert!((spinner - text).abs() < 0.5, "spinner {spinner} vs text {text}");
+        assert!((spinner - button).abs() < 0.5, "spinner {spinner} vs button {button}");
     }
 
     #[test]

@@ -74,6 +74,8 @@ pub enum Event {
         turn: usize,
         error: Option<String>,
     },
+    /// `lantern-engine hooks status` (JSON), after reading or changing the agent hooks.
+    Hooks(Result<String, String>),
     /// Point & Ask's message for an agent is ready (its screenshot saved), or couldn't be.
     PointAskSent {
         generation: u64,

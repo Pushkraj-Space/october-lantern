@@ -149,26 +149,25 @@ fn pending_card(ui: &mut Ui, cx: &mut Ctx, pending: &PendingTask) {
         .corner_radius(10)
         .inner_margin(Margin::same(9))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            let controls = ["Cancel", "Start"]
+                .iter()
+                .map(|title| ui.painter().layout_no_wrap((*title).into(), t::font(11.5, Weight::Semibold), t::INK).size().x)
+                .sum::<f32>();
+            let text_width = (ui.available_width() - 12.0 - controls - 30.0).max(1.0);
+            let folder = pending.folder.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or("");
+            let title = format!("Starting {} in {folder}… {}", pending.kind.display_name(), pending.seconds_left);
+            let mut prompt = egui::text::LayoutJob::single_section(
+                pending.prompt.clone(),
+                egui::TextFormat { font_id: t::font(11.0, Weight::Regular), color: t::MUTED, ..Default::default() },
+            );
+            prompt.wrap.max_width = text_width;
+            prompt.wrap.max_rows = 2;
+            let prompt = ui.painter().layout_job(prompt);
+            let height =
+                ui.painter().layout(title.clone(), t::font(12.0, Weight::Semibold), t::INK, text_width).size().y + 2.0 + prompt.size().y;
+            c::centered_row(ui, height, |ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 c::spinner(ui, 12.0, t::MUTED, cx.env);
-                let controls = ["Cancel", "Start"]
-                    .iter()
-                    .map(|title| ui.painter().layout_no_wrap((*title).into(), t::font(11.5, Weight::Semibold), t::INK).size().x)
-                    .sum::<f32>();
-                let text_width = (ui.available_width() - controls - 20.0).max(1.0);
-                let folder = pending.folder.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or("");
-                let title = format!("Starting {} in {folder}… {}", pending.kind.display_name(), pending.seconds_left);
-                let mut prompt = egui::text::LayoutJob::single_section(
-                    pending.prompt.clone(),
-                    egui::TextFormat { font_id: t::font(11.0, Weight::Regular), color: t::MUTED, ..Default::default() },
-                );
-                prompt.wrap.max_width = text_width;
-                prompt.wrap.max_rows = 2;
-                let prompt = ui.painter().layout_job(prompt);
-                let height = ui.painter().layout(title.clone(), t::font(12.0, Weight::Semibold), t::INK, text_width).size().y
-                    + 2.0
-                    + prompt.size().y;
                 ui.allocate_ui_with_layout(egui::vec2(text_width, height), Layout::top_down(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     c::label(ui, title, 12.0, Weight::Semibold, t::INK);

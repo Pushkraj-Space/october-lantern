@@ -37,21 +37,23 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx, compact: bool) {
             c::label(ui, detail(link), 11.5, Weight::Regular, t::MUTED);
             if let Some(code) = link.and_then(|link| link.pairing_code.as_deref()) {
                 egui::Frame::new().fill(t::AMBER.gamma_multiply(0.1)).corner_radius(10).inner_margin(Margin::same(10)).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 10.0;
-                        c::spinner(ui, 12.0, t::MUTED, cx.env);
+                    {
                         let job = egui::text::LayoutJob::single_section(code.into(), egui::TextFormat { font_id:t::font(20.0, Weight::MonoBold), color:t::AMBER, extra_letter_spacing:2.0, ..Default::default() });
                         let galley = ui.painter().layout_job(job);
-                        let width = (ui.available_width() - galley.size().x - 10.0).max(1.0);
+                        let width = (ui.available_width() - 12.0 - galley.size().x - 20.0).max(1.0);
                         let height = ui.painter().layout("Allow Lantern in October".into(), t::font(12.0, Weight::Semibold), t::INK, width).size().y
                             + 2.0 + ui.painter().layout("Check October shows this code:".into(), t::font(11.5, Weight::Regular), t::MUTED, width).size().y;
-                        ui.allocate_ui_with_layout(egui::vec2(width, height), Layout::top_down(Align::Min), |ui| {
+                        c::centered_row(ui, height.max(galley.size().y).max(12.0), |ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            c::spinner(ui, 12.0, t::MUTED, cx.env);
+                            ui.allocate_ui_with_layout(egui::vec2(width, height), Layout::top_down(Align::Min), |ui| {
                             ui.set_min_width(width); ui.set_max_width(width); ui.spacing_mut().item_spacing.y = 2.0;
                             c::label(ui, "Allow Lantern in October", 12.0, Weight::Semibold, t::INK);
                             c::label(ui, "Check October shows this code:", 11.5, Weight::Regular, t::MUTED);
                         });
                         ui.add(egui::Label::new(galley).extend());
-                    });
+                        });
+                    }
                 });
             }
             if let Some(message) = link.and_then(|link| link.message.as_deref()) { c::label(ui, message, 11.5, Weight::Regular, t::RED); }
