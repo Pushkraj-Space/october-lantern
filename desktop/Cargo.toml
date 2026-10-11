@@ -18,6 +18,10 @@ base64 = "0.23"
 egui_commonmark = { version = "0.25", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 semver = "1"
+# The October sign-in brand marks (macos/Resources/brands/*.svg), drawn crisp at any scale.
+resvg = { version = "0.48.1", default-features = false }
+# CommonMark inline parsing for chat Markdown (already in the tree through egui_commonmark).
+pulldown-cmark = { version = "0.13.4", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }

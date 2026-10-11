@@ -46,6 +46,9 @@ pub struct Fixture {
     pub reduce_motion: bool,
     pub model: Model,
     pub inputs: Inputs,
+    /// View-only state (welcome step, settings tab, expanded cards…), so every state renders
+    /// through the real path.
+    pub view: UiState,
 }
 
 impl Fixture {
@@ -129,11 +132,11 @@ fn save(image: &egui::ColorImage, height: f32, out: &Path) -> Result<()> {
 
 /// Renders `fixture` to `out` at `scale` (1 or 2), then returns.
 pub fn run(fixture: &Path, out: PathBuf, scale: f32) -> Result<()> {
-    let fixture = Fixture::load(fixture)?;
+    let mut fixture = Fixture::load(fixture)?;
     let size = fixture.surface.frame(fixture.max_height.unwrap_or(1032.0)) * scale;
     let result = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let app =
-        Render { fixture, view: UiState::default(), assets: None, out, frames: 0, height: 0.0, requested: false, result: result.clone() };
+    let view = std::mem::take(&mut fixture.view);
+    let app = Render { fixture, view, assets: None, out, frames: 0, height: 0.0, requested: false, result: result.clone() };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lantern fixture")
@@ -147,6 +150,7 @@ pub fn run(fixture: &Path, out: PathBuf, scale: f32) -> Result<()> {
         "Lantern fixture",
         options,
         Box::new(move |cc| {
+            ui::theme::install(&cc.egui_ctx);
             cc.egui_ctx.set_zoom_factor(scale);
             Ok(Box::new(app))
         }),
