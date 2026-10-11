@@ -251,7 +251,7 @@ fn ask_box(ui: &mut Ui, cx: &mut Ctx) {
                         edit.request_focus();
                         cx.view.assistant_focus = Some(cx.model.compose_focus);
                     }
-                    let submit = edit.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                    let submit = edit.has_focus() && c::consume_plain_key(ui, egui::Key::Enter);
                     ui.allocate_ui_with_layout(egui::vec2(50.0, edit.rect.height()), Layout::bottom_up(Align::Min), |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;

@@ -602,7 +602,7 @@ fn footer(ui: &mut Ui, cx: &mut Ctx) {
             response
         })
         .inner;
-    let enter = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let enter = c::consume_plain_key(ui, egui::Key::Enter);
     if enabled && (response.clicked() || enter) {
         cx.view.session_error = None;
         if cx.inputs.new_session.screenshot && !matches!(cx.model.new_session.screenshot, Capture::Ready { .. }) {

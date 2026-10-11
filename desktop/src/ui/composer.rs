@@ -56,7 +56,7 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx, agent: &Agent) {
                         edit.request_focus();
                         cx.view.composer_focus = focus;
                     }
-                    let submit = edit.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                    let submit = edit.has_focus() && c::consume_plain_key(ui, egui::Key::Enter);
                     let mic = if cx.model.dictating { Icon::Waveform } else { Icon::Mic };
                     let (mic_rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 22.0), Sense::hover());
                     c::paint_icon(

@@ -1,0 +1,4 @@
+{
+  "surface": "pointAsk", "nowMs": 1790000000000,
+  "model": {"point_ask": {"phase": "card", "screenshot": {"state": "ready", "path": "macos/Resources/october/hero-palace.jpg"}, "context": {"name": "October"}}}
+}

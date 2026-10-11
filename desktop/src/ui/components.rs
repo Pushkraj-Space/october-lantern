@@ -17,6 +17,20 @@ pub fn label(ui: &mut Ui, value: impl Into<String>, size: f32, weight: Weight, c
     ui.add(Label::new(text(value, size, weight, color)).wrap())
 }
 
+/// egui's consume_key(NONE, …) also matches Shift/Alt, which would submit a multiline
+/// field on Shift-Return. Consume only genuinely unmodified presses for native plain Return.
+pub fn consume_plain_key(ui: &mut Ui, key: egui::Key) -> bool {
+    ui.input_mut(|input| {
+        let mut pressed = false;
+        input.events.retain(|event| {
+            let matches = matches!(event, egui::Event::Key { key: event_key, modifiers, pressed: true, .. } if *event_key == key && *modifiers == egui::Modifiers::NONE);
+            pressed |= matches;
+            !matches
+        });
+        pressed
+    })
+}
+
 /// Small native-style activity indicator. The shell supplies time/repaints; fixtures freeze it.
 pub fn spinner(ui: &mut Ui, size: f32, color: Color32, env: &super::Env) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
@@ -132,7 +146,13 @@ pub fn material_tint(tint: f32, backdrop_blur: bool) -> f32 {
 pub fn glass_shape(rect: Rect, radius: f32, tint: f32) -> Shape {
     // Swift's glassSurface adds .35 black over GlassContainer's native tint.
     let alpha = 1.0 - (1.0 - tint.clamp(0.0, 1.0)) * 0.65;
-    let mut shapes = vec![Shape::rect_filled(rect, radius, theme::black(alpha))];
+    rimmed_shape(rect, radius, theme::black(alpha))
+}
+
+/// The same Swift GlassRim/sheen over a surface-specific fill. Point & Ask has its own
+/// nearly opaque gray background, rather than glassSurface's extra .35 black layer.
+pub fn rimmed_shape(rect: Rect, radius: f32, fill: Color32) -> Shape {
+    let mut shapes = vec![Shape::rect_filled(rect, radius, fill)];
     let perimeter = rounded_points(rect.shrink(0.5), radius.min(rect.width() / 2.0).min(rect.height() / 2.0));
     let color = move |y: f32, rim: bool| {
         let t = ((y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
@@ -552,4 +572,28 @@ mod tests {
         assert!(rim.closed);
         assert_eq!(rim.stroke.width, 1.0);
     }
+}
+#[test]
+fn plain_return_does_not_consume_shift_or_alt_return() {
+    let ctx = egui::Context::default();
+    let mut consumed = false;
+    let mut remaining = Vec::new();
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            events: [egui::Modifiers::SHIFT, egui::Modifiers::ALT, egui::Modifiers::NONE]
+                .into_iter()
+                .map(|modifiers| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers })
+                .collect(),
+            ..Default::default()
+        },
+        |ui| {
+            consumed = consume_plain_key(ui, egui::Key::Enter);
+            remaining = ui.input(|input| input.events.clone());
+            assert!(!consume_plain_key(ui, egui::Key::Enter));
+        },
+    );
+    output.textures_delta.clear();
+    assert!(consumed);
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.iter().all(|event| matches!(event, egui::Event::Key { modifiers, .. } if *modifiers != egui::Modifiers::NONE)));
 }

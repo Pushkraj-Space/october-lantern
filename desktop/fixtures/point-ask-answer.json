@@ -1,0 +1,13 @@
+{
+  "surface": "pointAsk", "nowMs": 1790000000000,
+  "model": {
+    "account": {"signed_in": {"email": "me@example.com", "plan": "Pro"}},
+    "agents": [{"id": "claude:1:1", "kind": "claude", "handle": "claude-26", "state": "waiting", "canReply": true}],
+    "point_ask": {
+      "phase": "card", "recipient": "claude:1:1",
+      "screenshot": {"state": "ready", "path": "macos/Resources/october/hero-palace.jpg"},
+      "context": {"name": "Browser", "window": "Checkout · Example", "url": "https://example.com/dashboard/payments/details/illustrative-fixture", "selected_text": "Your card was declined. Try another payment method."},
+      "turns": [{"question": "What does this message mean?", "answer": "The payment was **declined**. Try another card or ask your bank about the transaction.\nSee [the help page](https://example.com/help) for more detail.", "note": "19 free questions left today."}]
+    }
+  }
+}

@@ -14,6 +14,7 @@ mod feed;
 pub mod icons;
 mod markdown;
 mod october;
+mod point_ask;
 mod sessions;
 pub mod theme;
 mod welcome;
@@ -66,6 +67,12 @@ pub struct UiState {
     pub account_password: String,
     #[serde(skip)]
     pub desktop_flow: Option<(bool, f64)>,
+    #[serde(skip)]
+    pub point_ask_capture: sessions::CaptureTexture,
+    #[serde(skip)]
+    pub point_ask_focus: Option<u64>,
+    #[serde(skip)]
+    pub point_ask_scroll_anchor: Option<(usize, u64)>,
 }
 
 pub struct Ctx<'a> {
@@ -310,7 +317,7 @@ fn surface(ui: &mut egui::Ui, width: f32, max_height: f32, radius: f32, tint: f3
 
 /// The Point & Ask card, 400 wide.
 pub fn render_point_ask(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32) -> f32 {
-    placeholder(ui, cx, max_height, "Point & Ask")
+    point_ask::render(ui, cx, max_height)
 }
 
 /// Welcome, 540 x 560.
