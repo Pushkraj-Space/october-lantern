@@ -182,6 +182,18 @@ pub struct Extras<'a> {
     pub bus_note: Option<&'a str>,
 }
 
+/// How Lantern asks every agent it starts to answer, after the first message: where it is, and
+/// to give full paths (the person reads the answer in Lantern and opens files from it).
+pub(crate) fn with_guidance(message: String, cwd: &Path) -> String {
+    format!(
+        "{message}\n\n(Started from October Lantern on macOS. You're in {}. When you mention a file or folder, \
+         give its full absolute path (like /Users/name/Documents/file.pdf), not a relative one, so it can be opened \
+         directly. If the task is about something outside this folder, look for it across the Mac (for example with \
+         mdfind or find under the home folder). End with a short summary of what you did or found.)",
+        cwd.display()
+    )
+}
+
 /// The first message: your words, then the context, the screenshot's path and the toolkit list.
 /// Nothing is sent when there are no words and no screenshot (an agent would act on context
 /// alone).
@@ -342,7 +354,7 @@ pub fn launch(
     };
     let note = bus.as_ref().map(|b| crate::bus::note(&b.name));
     let extras = Extras { bus_note: note.as_deref(), ..extras };
-    let message = first_message(prompt.map(str::trim).filter(|p| !p.is_empty()), extras);
+    let message = first_message(prompt.map(str::trim).filter(|p| !p.is_empty()), extras).map(|m| with_guidance(m, cwd));
     let prompt = message.as_deref();
 
     if !installed().tmux {

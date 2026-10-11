@@ -143,7 +143,7 @@ final class Assistant: ObservableObject {
     }
 
     /// The project you named (matched against recent folders and agents' folders); otherwise
-    /// where your most recently active agent works, or your last folder.
+    /// your home folder.
     static func folder(for project: String?, model: AppModel) -> String {
         let agentFolders = model.agents.sorted { ($0.stateSince ?? 0) > ($1.stateSince ?? 0) }.compactMap(\.cwd)
         let candidates = model.recentFolders + agentFolders
@@ -152,7 +152,9 @@ final class Assistant: ObservableObject {
             ?? candidates.first(where: { URL(fileURLWithPath: $0).lastPathComponent.lowercased().contains(project) }) {
             return hit
         }
-        return agentFolders.first ?? model.recentFolders.first ?? FileManager.default.homeDirectoryForCurrentUser.path
+        // No project named: start in the home folder, where the agent can look anywhere
+        // ("find my passport" isn't about whichever repo was used last).
+        return FileManager.default.homeDirectoryForCurrentUser.path
     }
 
     /// A recent folder whose name the request mentions ("fix the tests in october-lantern").

@@ -397,6 +397,14 @@ struct Composer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if model.chatAgentId != nil {
+                // Inside a conversation the header already names the agent; only say how a reply
+                // gets there when Lantern can't type it in.
+                if let t = model.target, !t.canReply {
+                    Text("Your reply is copied, and Lantern opens \(t.host?.app ?? "its terminal")")
+                        .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                }
+            } else {
             Menu {
                 ForEach(model.agents) { agent in
                     // Inside a conversation, the recipient is the conversation: choosing another
@@ -418,6 +426,7 @@ struct Composer: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            }
 
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(model.target.map { "Message @\($0.handle)…" } ?? "Message an agent…", text: $model.draft, axis: .vertical)

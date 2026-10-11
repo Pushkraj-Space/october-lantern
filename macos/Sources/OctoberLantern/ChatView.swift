@@ -38,7 +38,9 @@ struct ChatView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                 }
-                .frame(height: min(440, max(180, metrics.maxHeight - 240)))
+                // Fits the conversation, up to the panel's room: a short chat stays short.
+                .frame(maxHeight: min(480, max(180, metrics.maxHeight - 240)))
+                .fixedSize(horizontal: false, vertical: true)
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
                 .onChange(of: model.chatMessages) {
                     if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -78,7 +80,15 @@ struct ChatView: View {
         } else if !model.chatSupported {
             note("Lantern can't read \(agent.kind.displayName) conversations yet. Click Open to see it in its terminal.")
         } else if model.chatMessages.isEmpty {
-            note(model.chatLoading ? "Loading…" : "No messages yet.")
+            if model.chatLoading {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading the conversation…").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 24)
+            } else {
+                note("No messages yet.")
+            }
         } else {
             if model.chatMessages.count >= Self.historyLimit {
                 HStack(spacing: 6) {

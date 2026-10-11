@@ -940,3 +940,11 @@ fn the_bundled_harness_counts_as_installed() {
     assert!(b.bin.ends_with("node_modules/.bin/october"));
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Every agent Lantern starts is told where it is and to give full paths.
+#[test]
+fn launched_agents_are_asked_for_full_paths() {
+    let m = crate::launch::with_guidance("find my passport".into(), std::path::Path::new("/Users/me"));
+    assert!(m.starts_with("find my passport"));
+    assert!(m.contains("You're in /Users/me") && m.contains("full absolute path"));
+}
