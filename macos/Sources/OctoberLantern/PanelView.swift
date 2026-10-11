@@ -19,7 +19,9 @@ struct PanelView: View {
             case .assistant:
                 AssistantHome(model: model)
             default:
-                if let agent = model.chatAgent {
+                if let preview = model.launchPreview {
+                    StartingChatView(preview: preview, model: model)
+                } else if let agent = model.chatAgent {
                     ChatView(agent: agent, model: model)
                 } else {
                 header
@@ -46,7 +48,7 @@ struct PanelView: View {
                     .transition(.opacity)
             }
             if model.panel?.isList ?? true {
-                if model.chatAgent != nil { Composer(model: model, dictation: dictation) }
+                if model.chatAgent != nil, model.launchPreview == nil { Composer(model: model, dictation: dictation) }
             }
         }
         .frame(width: 380)

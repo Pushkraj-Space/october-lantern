@@ -67,6 +67,14 @@ final class AppModel: ObservableObject {
     private var launchingModel = "default"
     /// A session Lantern just started: its conversation opens as soon as the agent shows up.
     private var openWhenSeen: (session: String, until: Date)?
+    /// A session starting in Lantern (in the background), shown as its conversation right away:
+    /// your message, and "Starting…" until the real conversation has something to show.
+    @Published private(set) var launchPreview: LaunchPreview?
+    /// Starts the previewed session again in a Terminal window instead.
+    private var previewRetry: (() -> Void)?
+    /// The preview was closed: the session still starts, but its conversation doesn't open.
+    private var previewClosed = false
+    private var previewTimeout: Task<Void, Never>?
     private var chatPoll: Task<Void, Never>?
     /// The agent whose conversation is open in the panel, if any.
     @Published private(set) var chatAgentId: String?
@@ -117,12 +125,15 @@ final class AppModel: ObservableObject {
         }
         engine.onActionResult = { [weak self] id, ok, message in self?.actionFinished(id, ok: ok, message: message) }
         engine.onLaunched = { [weak self] session in
-            self?.openWhenSeen = (session, Date().addingTimeInterval(30))
-            self?.openLaunched()
+            guard let self, !self.previewClosed else { return }
+            self.openWhenSeen = (session, Date().addingTimeInterval(30))
+            self.openLaunched()
         }
         engine.onHistory = { [weak self] agentId, supported, messages in
             guard let self, agentId == self.chatAgentId else { return }
             if self.chatLoading { self.chatLoading = false }
+            // The real conversation takes over from the preview once it has something to show.
+            if self.launchPreview != nil, !messages.isEmpty || !supported { self.endPreview() }
             if self.chatSupported != supported { self.chatSupported = supported }
             if messages != self.chatMessages { self.chatMessages = messages }
         }
@@ -252,11 +263,54 @@ final class AppModel: ObservableObject {
     }
 
     func closeChat() {
+        if launchPreview != nil { endPreview() }
         engine.cancelHistory()
         if chatAgentId != nil { chatAgentId = nil }
         if !chatMessages.isEmpty { chatMessages = [] }
         chatPoll?.cancel()
         chatPoll = nil
+    }
+
+    /// Closes the preview of a starting session; it keeps starting in the background (and shows
+    /// in Your agents) but its conversation won't open by itself.
+    func closePreview() {
+        if launching || pending.values.contains(where: { if case .launch = $0 { return true }; return false }) { previewClosed = true }
+        openWhenSeen = nil
+        endPreview()
+        closeChat()
+        if panel == .inbox { panel = .agents }
+    }
+
+    /// Starts the previewed session again in a Terminal window (after it failed in Lantern).
+    func retryPreviewInTerminal() {
+        guard let retry = previewRetry, !launching else { return }
+        endPreview()
+        retry()
+    }
+
+    /// For snapshots: shows a preview without starting anything.
+    func showPreview(_ preview: LaunchPreview) { launchPreview = preview }
+
+    private func endPreview() {
+        previewTimeout?.cancel()
+        previewTimeout = nil
+        previewRetry = nil
+        if launchPreview != nil { launchPreview = nil }
+    }
+
+    /// The session started; if its conversation hasn't taken over after a while (the agent is
+    /// slow to show up or to write its session file), stop waiting and show what there is.
+    private func waitForLaunched() {
+        previewTimeout?.cancel()
+        previewTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, !Task.isCancelled, self.launchPreview != nil else { return }
+            self.endPreview()
+            if self.chatAgentId == nil {
+                self.panel = .agents
+                self.show("Session started. It shows in Your agents when it's up.")
+            }
+        }
     }
 
     /// Opens the conversation of the session Lantern just started, once it appears.
@@ -462,6 +516,7 @@ final class AppModel: ObservableObject {
             launchAfterHarness = nil
             launching = false
             launchError = "Couldn't install October Harness: \(status.message ?? "unknown error")"
+            launchPreview?.error = launchError
         }
     }
 
@@ -505,6 +560,21 @@ final class AppModel: ObservableObject {
         toolkit: Bool = false, taskApp: String? = nil, background: Bool
     ) {
         guard !launching, !pending.values.contains(where: { if case .launch = $0 { return true }; return false }) else { return }
+        if background {
+            // Show the conversation now; the real one replaces it when the agent is up.
+            if chatAgentId != nil { closeChat() }
+            launchPreview = LaunchPreview(kind: kind, prompt: prompt, folder: folder)
+            previewClosed = false
+            previewRetry = { [weak self] in
+                self?.launch(
+                    kind: kind, folder: folder, prompt: prompt, screenshot: screenshot, model: model, context: context, toolkit: toolkit,
+                    taskApp: taskApp, background: false
+                )
+            }
+            if !(panel?.isList ?? false) { panel = .inbox }
+        } else if launchPreview != nil {
+            endPreview()
+        }
         // October without October Harness yet: install it first, then launch (the engine's launch
         // deadline is too short for a first install).
         if kind == .october, installedKinds != nil, !octoberReady {
@@ -724,11 +794,15 @@ final class AppModel: ObservableObject {
         case .launch:
             launching = false
             Analytics.shared.capture(ok ? "session_started" : "session_start_failed", ["kind": launchingKind, "background": launchingInBackground, "screenshot": launchingWithScreenshot, "model": launchingModel, "task": launchingTask, "bus": prefs.busForSessions])
-            if ok {
-                panel = .agents
+            if ok, launchPreview != nil {
+                waitForLaunched()
+            } else if ok {
+                if !previewClosed { panel = .agents }
+                previewClosed = false
                 show(message.map { "Session started. \($0)" } ?? "Session started")
             } else {
                 launchError = message ?? "unknown error"
+                launchPreview?.error = launchError
             }
         case .focus(let agentId):
             if !ok { show("Couldn't open @\(handle(agentId)): \(message ?? "unknown error")") }
@@ -754,10 +828,20 @@ final class AppModel: ObservableObject {
         overdue.removeAll()
         launching = false
         launchAfterHarness = nil
+        launchPreview?.error = "Lantern's engine stopped before the session started."
         firstSnapshot = true
         agents = []
         closeChat()
         PhoneModel.shared.reset()
         show(unsure.isEmpty ? message : "\(message) Check \(names): what was being sent may or may not have gone in.")
     }
+}
+
+/// A session starting in Lantern, shown before its real conversation exists.
+struct LaunchPreview: Equatable {
+    let kind: AgentKind
+    let prompt: String
+    let folder: String
+    /// Why it couldn't start.
+    var error: String?
 }
