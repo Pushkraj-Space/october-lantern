@@ -17,6 +17,22 @@ pub fn label(ui: &mut Ui, value: impl Into<String>, size: f32, weight: Weight, c
     ui.add(Label::new(text(value, size, weight, color)).wrap())
 }
 
+/// Small native-style activity indicator. The shell supplies time/repaints; fixtures freeze it.
+pub fn spinner(ui: &mut Ui, size: f32, color: Color32, env: &super::Env) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let phase = if env.reduce_motion { 0 } else { (env.now_ms.max(0.0) / 80.0) as usize % 12 };
+    for i in 0..12 {
+        let angle = i as f32 * std::f32::consts::TAU / 12.0;
+        let direction = egui::vec2(angle.cos(), angle.sin());
+        let alpha = 0.2 + 0.8 * ((i + 12 - phase) % 12) as f32 / 11.0;
+        ui.painter().line_segment(
+            [rect.center() + direction * size * 0.28, rect.center() + direction * size * 0.47],
+            Stroke::new((size / 10.0).max(1.0), color.gamma_multiply(alpha)),
+        );
+    }
+    response
+}
+
 /// Plain button with no egui chrome. `size` is the hit box, the glyph sits inside it.
 pub fn icon_button(ui: &mut Ui, id: impl egui::AsIdSalt, icon: Icon, size: f32, tint: Color32, active: bool) -> Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
@@ -388,6 +404,7 @@ mod tests {
                         Cpu,
                         Folder,
                         Terminal,
+                        Window,
                         Chat,
                         Copy,
                         Check,

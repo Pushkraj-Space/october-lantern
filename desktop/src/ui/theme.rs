@@ -1,6 +1,11 @@
 //! Tokens transcribed from `Components.swift`, not the old desktop theme.
 //! Typography uses bundled OFL fonts (see fonts/README.md). They deliberately do not depend on
 //! the host font collection. SF's proprietary outlines/metrics are not claimed to be reproduced.
+//! Inter 4.1: rsms/inter v4.1 release, SIL OFL 1.1 (`fonts/LICENSE.txt`).
+//! Nunito Bold: google/fonts commit 8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5,
+//! weight 700 instantiation, SIL OFL 1.1 (`fonts/Nunito-OFL.txt`).
+//! JetBrains Mono 2.304: JetBrains/JetBrainsMono commit cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9,
+//! SIL OFL 1.1 (`fonts/JetBrainsMono-OFL.txt`). Exact upstream URLs are in `fonts/README.md`.
 use crate::model::AgentState;
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle};
 

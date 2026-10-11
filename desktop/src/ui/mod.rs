@@ -10,6 +10,7 @@ pub mod components;
 mod composer;
 mod feed;
 pub mod icons;
+mod sessions;
 pub mod theme;
 
 use crate::model::{AgentId, AgentKind, AppContext, Edge, Inputs, Model, PanelMode};
@@ -41,6 +42,13 @@ pub struct UiState {
     pub settings_tab: usize,
     #[serde(skip)]
     pub composer_focus: Option<(String, u64)>,
+    pub searching_models: bool,
+    pub model_query: String,
+    pub session_error: Option<String>,
+    #[serde(skip)]
+    pub model_search_kind: Option<AgentKind>,
+    #[serde(skip)]
+    pub capture_texture: sessions::CaptureTexture,
 }
 
 pub struct Ctx<'a> {
@@ -228,7 +236,7 @@ pub fn render_panel(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32) -> f32 {
         feed::engine_banner(ui, cx);
         match cx.model.panel {
             Some(PanelMode::NewSession) => {
-                placeholder(ui, cx, max_height, "New session");
+                sessions::render(ui, cx, max_height);
             }
             Some(PanelMode::October) => {
                 placeholder(ui, cx, max_height, "October");
@@ -316,7 +324,7 @@ mod tests {
     use super::*;
     use crate::model::{Agent, AgentState, Chat, ChatMessage, EngineHealth, LaunchPreview, Role, Route};
 
-    fn frame(
+    pub(super) fn frame(
         ctx: &egui::Context,
         assets: &Assets,
         model: &Model,
@@ -372,6 +380,11 @@ mod tests {
             include_str!("../../fixtures/panel-starting.json"),
             include_str!("../../fixtures/panel-starting-failed.json"),
             include_str!("../../fixtures/panel-empty.json"),
+            include_str!("../../fixtures/panel-new-session.json"),
+            include_str!("../../fixtures/panel-new-session-task.json"),
+            include_str!("../../fixtures/panel-new-session-permission.json"),
+            include_str!("../../fixtures/panel-new-session-loading.json"),
+            include_str!("../../fixtures/panel-new-session-no-agents.json"),
         ] {
             let mut fixture: crate::app::fixture::Fixture = serde_json::from_str(raw).unwrap();
             let (height, actions, _) = frame(&ctx, &assets, &fixture.model, &mut fixture.inputs, &mut UiState::default(), Vec::new());

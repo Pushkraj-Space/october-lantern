@@ -1,0 +1,16 @@
+{
+  "surface": "panel", "maxHeight": 1032, "nowMs": 1790000000000, "home": "/home/me", "reduceMotion": true,
+  "model": {
+    "panel": "newSession", "engine": {"state": "ready"},
+    "new_session": {
+      "installed": ["october", "claude", "codex"], "in_lantern_available": true,
+      "models": {"october": {"choosable": true, "models": [
+        {"id": "claude-sonnet-4-6", "label": "Sonnet 4.6", "group": "Anthropic"},
+        {"id": "gpt-5.4", "label": "GPT-5.4", "group": "OpenAI"}
+      ]}},
+      "task_app": {"name": "DaVinci Resolve", "id": "resolve", "window": "video-3", "document": "/home/me/Videos/video-3.drp"},
+      "screenshot": {"state": "capturing"}
+    }
+  },
+  "inputs": {"new_session": {"prompt": "Remove the pauses and add captions to this clip.", "kind": "october", "task": true, "screenshot": true}}
+}

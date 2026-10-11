@@ -58,7 +58,7 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx, agent: &Agent, max_height: f32) {
                 }else if chat.messages.is_empty(){
                     if chat.loading{
                         egui::Frame::new().inner_margin(Margin::symmetric(0,24)).show(ui,|ui|{ui.horizontal(|ui|{
-                            ui.add_space(60.0);ui.add(egui::Spinner::new().size(12.0));c::label(ui,"Loading the conversation…",12.0,Weight::Regular,t::MUTED);
+                            ui.add_space(60.0);c::spinner(ui,12.0,t::MUTED,cx.env);c::label(ui,"Loading the conversation…",12.0,Weight::Regular,t::MUTED);
                         });});
                     }else{note(ui,"No messages yet.");}
                 }else{
@@ -69,7 +69,7 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx, agent: &Agent, max_height: f32) {
                         });ui.add_space(4.0);
                     }
                     for (key,message) in keyed(&chat.messages){bubble(ui,cx,message,&key);}
-                    if agent.state==AgentState::Working{ui.horizontal(|ui|{ui.add_space(4.0);ui.add(egui::Spinner::new().size(10.0));c::label(ui,"Working…",11.0,Weight::Regular,t::MUTED);});}
+                    if agent.state==AgentState::Working{ui.horizontal(|ui|{ui.add_space(4.0);c::spinner(ui,10.0,t::MUTED,cx.env);c::label(ui,"Working…",11.0,Weight::Regular,t::MUTED);});}
                 }
             });
         });
@@ -112,7 +112,7 @@ pub fn preview(ui: &mut Ui, cx: &mut Ctx, preview: &LaunchPreview) {
         } else {
             ui.horizontal(|ui| {
                 ui.add_space(4.0);
-                ui.add(egui::Spinner::new().size(10.0));
+                c::spinner(ui, 10.0, t::MUTED, cx.env);
                 let status = if preview.kind.as_str() == "october"
                     && cx.model.harness.as_ref().is_some_and(|h| h.status == HarnessState::Installing)
                 {

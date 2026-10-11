@@ -24,6 +24,7 @@ pub enum Icon {
     Cpu,
     Folder,
     Terminal,
+    Window,
     Chat,
     Copy,
     Check,
@@ -182,6 +183,12 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.rect((2.0, 4.0), (22.0, 20.0), 2.0, false);
             p.line(&[(6.0, 9.0), (10.0, 12.0), (6.0, 15.0)]);
             p.line(&[(12.0, 15.0), (18.0, 15.0)]);
+        }
+        Window => {
+            p.rect((2.0, 4.0), (22.0, 20.0), 2.0, false);
+            p.circle(5.0, 7.0, 0.6, true);
+            p.circle(8.0, 7.0, 0.6, true);
+            p.circle(11.0, 7.0, 0.6, true);
         }
         Chat => {
             p.rect((2.0, 3.0), (19.0, 17.0), 3.0, false);
