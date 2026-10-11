@@ -69,9 +69,18 @@ impl Lantern {
         crate::os::task(self.tx.clone(), || crate::os::hooks("status"), Event::Hooks);
     }
 
+    /// Whether the desktop lets notifications through (the Mac's authorization status).
+    pub(super) fn refresh_notifications(&self) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::NotificationsAllowed(crate::os::notifications_allowed()));
+        });
+    }
+
     pub(super) fn set_hooks(&mut self, enabled: bool) {
         let action = if enabled { "install" } else { "uninstall" };
         self.model.system.hooks_error = None;
+        self.model.system.hooks_busy = true;
         crate::os::task(
             self.tx.clone(),
             move || {
@@ -83,6 +92,7 @@ impl Lantern {
     }
 
     pub(super) fn hooks_result(&mut self, result: Result<String, String>) {
+        self.model.system.hooks_busy = false;
         match result.map(|status| hook_states(&status)) {
             Ok(states) => {
                 self.model.system.hooks = states;

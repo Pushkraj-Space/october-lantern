@@ -67,6 +67,8 @@ pub enum Event {
     },
     /// `lantern-engine hooks status` (JSON), after reading or changing the agent hooks.
     Hooks(Result<String, String>),
+    /// Whether the desktop lets Lantern's notifications through (`None`: can't tell).
+    NotificationsAllowed(Option<bool>),
     /// Point & Ask's message for an agent is ready (its screenshot saved), or couldn't be.
     PointAskSent {
         generation: u64,

@@ -27,6 +27,16 @@ impl Lantern {
         }
     }
 
+    /// Opens Welcome on its first step, with fresh hook states (Swift `.task { hooks.refresh() }`).
+    pub(super) fn show_welcome(&mut self) {
+        if !self.windows.dialogs.welcome {
+            self.view.welcome_step = 0;
+            self.refresh_hooks();
+            self.refresh_notifications();
+        }
+        self.windows.dialogs.welcome = true;
+    }
+
     pub(super) fn finish_welcome(&mut self) {
         self.windows.dialogs.welcome = false;
         self.model.prefs.welcomed = true;
@@ -36,10 +46,9 @@ impl Lantern {
     }
 
     pub(super) fn dialogs(&mut self, ctx: &egui::Context) {
-        let state = &mut self.windows.dialogs;
-        if state.welcome_at.is_some_and(|at| Instant::now() >= at) {
-            state.welcome_at = None;
-            state.welcome = true;
+        if self.windows.dialogs.welcome_at.is_some_and(|at| Instant::now() >= at) {
+            self.windows.dialogs.welcome_at = None;
+            self.show_welcome();
         }
         let center = self.windows.work_areas().first().map_or(egui::pos2(960.0, 540.0), Rect::center);
         if self.windows.dialogs.settings {

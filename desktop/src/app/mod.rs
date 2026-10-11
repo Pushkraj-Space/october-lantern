@@ -84,8 +84,6 @@ pub struct Lantern {
     pointing: point_ask::Pointing,
     upkeep: preferences::Upkeep,
     dictating: dictation::Dictating,
-    /// A tray host shows Lantern's status menu (GNOME needs the AppIndicator extension).
-    tray: bool,
     /// The October account, once signed in (its access token asks October's AI).
     session: Option<crate::account::Session>,
     /// Sign-in attempts: a newer one (or signing out) makes older results stale.
@@ -129,7 +127,6 @@ impl Lantern {
             launching: session::Launching::default(),
             asking: assistant::Asking::default(),
             pointing: point_ask::Pointing::default(),
-            tray: false,
             upkeep: preferences::Upkeep::default(),
             dictating: dictation::Dictating::default(),
             session: None,
@@ -179,8 +176,9 @@ impl Lantern {
             Event::Activate(id) => self.activate(&id),
             Event::Quit => self.windows.quit(),
             Event::Shortcuts(available) => self.model.caps.global_hotkeys = available,
-            Event::Tray(available) => self.tray = available,
+            Event::Tray(available) => self.model.caps.tray = available,
             Event::Hooks(result) => self.hooks_result(result),
+            Event::NotificationsAllowed(allowed) => self.model.system.notifications_allowed = allowed,
             Event::Transcript { owner, generation, result } => self.transcript(&owner, generation, result),
             Event::Update(result) => self.update_result(result),
             Event::Assistant { generation, turn, piece } => self.assistant_piece(generation, turn, piece),
@@ -384,6 +382,7 @@ pub fn run(terminal: &str, start: Option<&str>) -> Result<()> {
             lantern.first_launch();
             lantern.start_desktop();
             lantern.refresh_hooks();
+            lantern.refresh_notifications();
             Ok(Box::new(lantern))
         }),
     )

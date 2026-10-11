@@ -46,7 +46,7 @@ impl Lantern {
         ];
         // The Mac quits from its menu bar. Without a tray host (GNOME without AppIndicator
         // support) this menu is the only way out, so it carries Quit too.
-        if !self.tray {
+        if !self.model.caps.tray {
             entries.extend([Entry::Separator, Entry::Item("Quit October Lantern".into(), UiAction::Quit)]);
         }
         entries
@@ -152,14 +152,14 @@ mod tests {
     fn the_menu_matches_the_macs_and_dictation_toggles_its_title() {
         let (engine, _) = crate::sidecar::test_sender();
         let mut lantern = Lantern::new(engine, None);
-        lantern.tray = true;
+        lantern.model.caps.tray = true;
         assert_eq!(
             titles(&lantern),
             ["Ask Lantern", "Your Agents", "New Session…", "Point & Ask", "Dictate a Reply", "—", "October…", "Settings…"]
         );
         lantern.model.dictating = true;
         assert_eq!(titles(&lantern)[4], "Stop Dictating");
-        lantern.tray = false;
+        lantern.model.caps.tray = false;
         assert_eq!(titles(&lantern).last().map(String::as_str), Some("Quit October Lantern"), "without a tray, the only way to quit");
     }
 }

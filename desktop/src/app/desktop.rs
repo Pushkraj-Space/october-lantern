@@ -2,7 +2,7 @@
 //! the Mac's status menu, global shortcuts, notifications for turns that wait on you, and a second
 //! launch handing its request to the running Lantern.
 use super::Lantern;
-use crate::model::PanelMode;
+use crate::model::{PanelMode, hotkey_label};
 use crate::ui::UiAction;
 use std::sync::{Arc, RwLock};
 
@@ -94,17 +94,6 @@ impl Lantern {
         }
         self.apply(action);
     }
-}
-
-/// "ctrl+alt+space" → "Ctrl+Alt+Space".
-pub fn hotkey_label(keys: &str) -> String {
-    keys.split('+')
-        .map(|part| {
-            let mut chars = part.chars();
-            chars.next().map_or(String::new(), |first| first.to_uppercase().chain(chars).collect())
-        })
-        .collect::<Vec<_>>()
-        .join("+")
 }
 
 #[cfg(test)]

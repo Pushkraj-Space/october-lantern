@@ -79,7 +79,11 @@ impl Lantern {
             UiAction::CancelSignIn => self.cancel_sign_in(),
             UiAction::SignOut => self.sign_out(),
             UiAction::ToggleDictation { owner } => self.toggle_dictation(owner),
-            UiAction::ShowSettings => self.windows.dialogs.settings = true,
+            UiAction::ShowSettings => {
+                self.refresh_notifications();
+                self.refresh_hooks();
+                self.windows.dialogs.settings = true;
+            }
             UiAction::ChangeSetting(change) => self.change_setting(change),
             UiAction::SetHooks { enabled } => self.set_hooks(enabled),
             UiAction::RefreshToolkit => self.refresh_toolkit(false),
@@ -88,7 +92,7 @@ impl Lantern {
             UiAction::CheckUpdates => self.check_updates(),
             // The confirmation step is the Settings view's own state.
             UiAction::ConfirmUninstall => self.uninstall(),
-            UiAction::ShowWelcome => self.windows.dialogs.welcome = true,
+            UiAction::ShowWelcome => self.show_welcome(),
             UiAction::FinishWelcome => self.finish_welcome(),
             UiAction::StartPointAsk => self.start_point_ask(),
             UiAction::ReselectPointAsk => self.reselect_point_ask(),

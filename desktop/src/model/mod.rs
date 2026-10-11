@@ -549,6 +549,8 @@ pub struct SystemState {
     /// Claude Code and Codex hooks.
     pub hooks: HashMap<String, HookState>,
     pub hooks_error: Option<String>,
+    /// Installing or removing the hooks.
+    pub hooks_busy: bool,
     /// `None` while unknown.
     pub notifications_allowed: Option<bool>,
     pub update: Option<UpdateInfo>,
@@ -629,6 +631,17 @@ pub fn offered_folders(prefs: &Prefs, agents: &[Agent], home: &str) -> Vec<Strin
         .collect()
 }
 
+/// "ctrl+alt+space" → "Ctrl+Alt+Space" (menus, Welcome and Settings show shortcuts this way).
+pub fn hotkey_label(keys: &str) -> String {
+    keys.split('+')
+        .map(|part| {
+            let mut chars = part.chars();
+            chars.next().map_or(String::new(), |first| first.to_uppercase().chain(chars).collect())
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 impl Prefs {
     /// Whether a harness counts in Waiting, the badge and notifications.
     pub fn counts(&self, kind: &AgentKind) -> bool {
@@ -663,6 +676,8 @@ pub struct Caps {
     pub selected_text: bool,
     pub dictation: bool,
     pub global_hotkeys: bool,
+    /// A tray host shows Lantern's status menu (GNOME needs the AppIndicator extension). Live.
+    pub tray: bool,
 }
 
 /// Everything the UI reads. Field names are frozen (CONTRACT §3); changes go through the bus.

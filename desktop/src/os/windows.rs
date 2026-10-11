@@ -26,7 +26,9 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
-use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW};
+use windows_sys::Win32::System::Registry::{
+    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
+};
 use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, RegisterHotKey};
 use windows_sys::Win32::UI::Shell::{
@@ -190,7 +192,7 @@ fn capture_display() -> Result<image::RgbaImage> {
 
 pub fn diagnostics() -> Result<serde_json::Value> {
     Ok(
-        serde_json::json!({"system": "windows", "tray": true, "globalShortcut": "Ctrl+Alt+L", "screenshots": "display under the pointer", "dictation": "waveIn + whisper.cpp"}),
+        serde_json::json!({"system": "windows", "tray": true, "globalShortcuts": ["Ctrl+Alt+Space", "Ctrl+Alt+P"], "screenshots": "display under the pointer", "dictation": "waveIn + whisper.cpp", "notifications": notifications_allowed()}),
     )
 }
 
@@ -540,6 +542,26 @@ pub fn shortcuts(tx: Sender<Event>) {
     send(&tx, ShellCommand::Shortcuts);
 }
 
+/// Whether Windows shows notifications at all (Settings › System › Notifications); it is off
+/// when `ToastEnabled` is 0. Lantern's own come from its tray icon.
+pub fn notifications_allowed() -> Option<bool> {
+    let (key, value) = (wide(r"Software\Microsoft\Windows\CurrentVersion\PushNotifications"), wide("ToastEnabled"));
+    let mut data = 1u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut data as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    // No value: Windows' default, on.
+    Some(status != ERROR_SUCCESS || data != 0)
+}
 pub fn notify(tx: Sender<Event>, agent: String, title: String, body: String) {
     send(&tx, ShellCommand::Notify { agent, title, body });
 }

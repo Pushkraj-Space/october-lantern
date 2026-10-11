@@ -146,7 +146,7 @@ pub fn diagnostics() -> Result<serde_json::Value> {
     let session = Proxy::new(&connection, "org.freedesktop.portal.Desktop", handle, "org.freedesktop.portal.Session")?;
     let _: () = session.call("Close", &())?;
     Ok(
-        serde_json::json!({"screenshot":screenshot_version,"globalShortcuts":shortcuts_version,"fileChooser":chooser_version,"shortcutSession":"created and closed"}),
+        serde_json::json!({"screenshot":screenshot_version,"globalShortcuts":shortcuts_version,"fileChooser":chooser_version,"shortcutSession":"created and closed","notifications":notifications_allowed()}),
     )
 }
 pub fn folder() -> Result<PathBuf> {
@@ -201,6 +201,27 @@ pub fn shortcuts(tx: Sender<Event>) {
             let _ = tx.send(Event::Status(format!("Shortcuts: {error:#}")));
         }
     });
+}
+/// Whether notifications reach the person: no notification server means nobody shows them, and
+/// GNOME has a per-app switch (Settings › Notifications › October Lantern). `None` when unknown.
+pub fn notifications_allowed() -> Option<bool> {
+    let connection = Connection::session().ok()?;
+    let dbus = zbus::blocking::fdo::DBusProxy::new(&connection).ok()?;
+    let name = zbus::names::BusName::try_from("org.freedesktop.Notifications").ok()?;
+    if !dbus.name_has_owner(name).ok()? {
+        return None;
+    }
+    let output = super::command("gsettings")
+        .args([
+            "get",
+            "org.gnome.desktop.notifications.application:/org/gnome/desktop/notifications/application/dev-october-lantern/",
+            "enable",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success());
+    // Not GNOME (or no gsettings): the server is there, and nothing else can block us.
+    Some(output.is_none_or(|output| String::from_utf8_lossy(&output.stdout).trim() != "false"))
 }
 pub fn notify(tx: Sender<Event>, agent: String, title: String, body: String) {
     std::thread::spawn(move || {

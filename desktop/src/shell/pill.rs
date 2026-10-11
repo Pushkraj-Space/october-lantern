@@ -143,13 +143,12 @@ fn lantern_button(painter: &egui::Painter, rect: Rect, model: &Model, assets: &A
         }
     }
     let lit = count > 0 || waiting || working;
-    // Aspect-fit in 34 x 34. Idle: Swift dims to saturation .55 / opacity .8; a grey tint at .8 is
-    // the closest egui gets without a shader.
+    // Aspect-fit in 34 x 34. Idle: Swift's `.saturation(0.55).opacity(0.8)` (the desaturated art at .8).
     let [w, h] = assets.logo.size().map(|side| side as f32);
     let fit = 34.0 / w.max(h);
     let logo = Rect::from_center_size(center, vec2(w * fit, h * fit));
-    let tint = if lit { Color32::WHITE } else { Color32::from_rgba_unmultiplied(200, 200, 200, 204) };
-    painter.image(assets.logo.id(), logo, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), tint);
+    let (texture, tint) = if lit { (&assets.logo, Color32::WHITE) } else { (&assets.logo_idle, theme::white(0.8)) };
+    painter.image(texture.id(), logo, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), tint);
     if count > 0 {
         let galley = painter.layout_no_wrap(count.to_string(), theme::font(10.0, theme::Weight::Rounded), theme::black(0.85));
         let width = (galley.size().x + 10.0).max(17.0);
