@@ -599,9 +599,10 @@ impl Default for Prefs {
             default_task_agent: AgentKind::OCTOBER.into(),
             screenshot_new_sessions: false,
             bus_for_sessions: true,
-            toolkit_in_sessions: true,
+            // As Preferences.swift registers them: finishing notifies, the toolkit list is opt-in.
+            toolkit_in_sessions: false,
             notifications: true,
-            notify_finished: false,
+            notify_finished: true,
             muted: Vec::new(),
             open_at_login: false,
             message_hotkey: "ctrl+alt+space".into(),
