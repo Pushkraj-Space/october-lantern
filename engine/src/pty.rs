@@ -133,7 +133,8 @@ pub fn info(name: &str) -> Result<Info> {
 /// Types `text` (one line), then Enter. Once the text is in, a failed Enter is uncertain.
 pub fn send_text(name: &str, text: &str) -> Result<()> {
     request(name, &json!({"op": "text", "text": text}))?;
-    std::thread::sleep(Duration::from_millis(60));
+    // Return as a key press of its own, not part of the pasted text (deliver::ENTER_AFTER_PASTE).
+    std::thread::sleep(crate::deliver::ENTER_AFTER_PASTE);
     request(name, &json!({"op": "key", "bytes": "\r"}))
         .map(|_| ())
         .map_err(|e| crate::deliver::Uncertain(format!("the text went in but Enter didn't ({e:#})")).into())

@@ -42,8 +42,11 @@ if (out && process.cwd().endsWith('project')) {
   fs.writeFileSync(path.join(out, 'args.json'), JSON.stringify(process.argv.slice(2)));
   process.stdin.on('data', (d) => fs.writeFileSync(path.join(out, 'reply.txt'), d));
 } else if (out) {
-  // An agent in a console of its own: what Lantern types arrives as console input.
-  process.stdin.on('data', (d) => fs.appendFileSync(path.join(out, 'console-reply.txt'), d));
+  // An agent in a console of its own, reading raw keys like Claude Code's and Codex's TUIs:
+  // what Lantern types arrives as console input, each chunk logged with its time.
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  process.stdin.on('data', (d) => fs.appendFileSync(path.join(out, 'console-reply.txt'),
+    JSON.stringify({ t: Date.now(), d: d.toString() }) + '\n'));
 }
 setInterval(() => {}, 1000);
 """
@@ -126,10 +129,21 @@ with tempfile.TemporaryDirectory(prefix="lantern smoke-", ignore_cleanup_errors=
         typed = read_until(lambda v: v.get("requestId") == "smoke-reply")
         assert typed["ok"], typed
         console_reply = folder / "console-reply.txt"
+
+        def chunks():
+            return [json.loads(line) for line in console_reply.read_text().splitlines()] if console_reply.exists() else []
+
         deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and "hello from Lantern & co" not in (console_reply.read_text() if console_reply.exists() else ""):
+        while time.monotonic() < deadline and not any("\r" in c["d"] for c in chunks()):
             time.sleep(0.2)
-        assert "hello from Lantern & co" in console_reply.read_text(), console_reply.read_text() if console_reply.exists() else "nothing arrived"
+        got = chunks()
+        typed = "".join(c["d"] for c in got if "\r" not in c["d"])
+        enter = [c for c in got if "\r" in c["d"]]
+        assert typed == "hello from Lantern & co", got
+        # Enter is a key press of its own, well after the text: TUIs read an Enter right after a
+        # pasted burst as a newline, not as submit.
+        assert len(enter) == 1 and enter[0]["d"] == "\r", got
+        assert enter[0]["t"] - max(c["t"] for c in got if "\r" not in c["d"]) >= 300, got
         print("PASS: console discovery, npm-installed Claude Code, transcript and history, reply typed into its console")
 
         # A session Lantern starts: the message reaches the agent intact (no shell in between),

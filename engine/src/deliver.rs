@@ -157,6 +157,11 @@ pub fn prepare(agent: &Agent, limit: Duration) -> Result<()> {
     }
 }
 
+/// On Windows a console write arrives as one instant burst, which agent TUIs treat as a paste:
+/// Codex turns an Enter that follows a paste within ~120 ms into a newline instead of submitting.
+/// Enter waits well past that, so it's read as its own key press.
+pub const ENTER_AFTER_PASTE: Duration = Duration::from_millis(500);
+
 /// One line of text, then Enter. Newlines would submit early in most agent UIs.
 pub fn send_text(agent: &Agent, text: &str) -> Result<()> {
     verify(agent)?;

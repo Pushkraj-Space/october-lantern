@@ -200,9 +200,9 @@ pub fn type_into(pid: u32, start: u64, kind: &str, mode: &str, payload: &str) ->
             }
         };
         let typed = write(&records(&keys));
-        // Like a paste followed by Return, so the agent reads the text before it submits.
+        // A paste, then Return as a key press of its own (see deliver::ENTER_AFTER_PASTE).
         let entered = (typed == Written::All && mode == "text").then(|| {
-            std::thread::sleep(std::time::Duration::from_millis(60));
+            std::thread::sleep(crate::deliver::ENTER_AFTER_PASTE);
             write(&records(&[ENTER]))
         });
         unsafe { CloseHandle(input) };
@@ -243,6 +243,12 @@ mod tests {
         assert!(native_programs("codex").contains(&"codex-x86_64-pc-windows-msvc.exe"));
         assert!(!native_programs("codex").contains(&"codex-tool.exe"), "exact names only");
         assert!(native_programs("").is_empty());
+    }
+
+    #[test]
+    fn enter_waits_past_the_paste_window_of_agent_tuis() {
+        // Codex reads an Enter within ~120 ms of a pasted burst as a newline.
+        assert!(crate::deliver::ENTER_AFTER_PASTE >= std::time::Duration::from_millis(300));
     }
 
     fn uncertain(result: Result<()>) -> bool {
