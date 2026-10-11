@@ -405,7 +405,8 @@ fn load_state() -> (Prefs, Turns) {
         return Default::default();
     }
     let Ok(text) = std::fs::read_to_string(state_path()) else {
-        return (carried_over(&crate::settings::Settings::load().unwrap_or_default()), Turns::default());
+        let legacy = std::fs::read_to_string(crate::settings::config_dir().join("settings.json")).unwrap_or_default();
+        return (first_prefs(&legacy), Turns::default());
     };
     let value: Value = serde_json::from_str(&text).unwrap_or_default();
     let prefs = offered_shortcuts(serde_json::from_value(value["prefs"].clone()).unwrap_or_default());
@@ -422,6 +423,16 @@ fn offered_shortcuts(mut prefs: Prefs) -> Prefs {
         prefs.point_ask_hotkey = defaults.point_ask_hotkey;
     }
     prefs
+}
+
+/// A first run: the earlier window's choices when it ran here (it always wrote `welcome_seen`;
+/// the dictation setup scripts write only their own keys), otherwise the Mac's defaults.
+fn first_prefs(legacy: &str) -> Prefs {
+    let value: Value = serde_json::from_str(legacy).unwrap_or_default();
+    if value.get("welcome_seen").is_none() {
+        return Prefs::default();
+    }
+    serde_json::from_value(value).map(|old| carried_over(&old)).unwrap_or_default()
 }
 
 /// A first run after the earlier window: keep the choices people made there.
@@ -450,6 +461,16 @@ mod carry_over_tests {
         assert!(!prefs.notifications && prefs.notify_finished && !prefs.toolkit_in_sessions && prefs.bus_for_sessions);
         assert!(prefs.automatic_updates && prefs.welcomed);
         assert_eq!(prefs.pill_top, 0.72, "everything else starts as on the Mac");
+        // A new install, or one where only the dictation setup wrote settings.json, starts as
+        // on the Mac rather than with the earlier window's defaults.
+        let fresh = crate::model::Prefs::default();
+        for legacy in ["", r#"{"whisper":"/x/whisper-cli","whisper_model":"/x/m.bin"}"#] {
+            let prefs = super::first_prefs(legacy);
+            assert_eq!(
+                (prefs.automatic_updates, prefs.bus_for_sessions, prefs.toolkit_in_sessions, prefs.notify_finished),
+                (fresh.automatic_updates, fresh.bus_for_sessions, fresh.toolkit_in_sessions, fresh.notify_finished)
+            );
+        }
         let edited = crate::model::Prefs { message_hotkey: "alt+space".into(), point_ask_hotkey: "none".into(), ..Default::default() };
         let offered = super::offered_shortcuts(edited);
         assert_eq!((offered.message_hotkey.as_str(), offered.point_ask_hotkey.as_str()), ("ctrl+alt+space", "none"));
