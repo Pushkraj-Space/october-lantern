@@ -1067,7 +1067,7 @@ fn the_bundled_harness_counts_as_installed() {
     fs::write(target.node_exe(&node_bin), "").unwrap();
     let b = bundled_in(&root).unwrap();
     assert_eq!(b.node_bin, node_bin);
-    assert!(b.bin.ends_with("node_modules/.bin/october"));
+    assert_eq!(b.bin, target.harness_bin(&dir), "the system's own program (october.cmd on Windows)");
     let _ = fs::remove_dir_all(&root);
 }
 
