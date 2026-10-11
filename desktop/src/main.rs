@@ -966,9 +966,13 @@ fn main() -> anyhow::Result<()> {
         };
         return app::fixture::run(std::path::Path::new(fixture), out, scale);
     }
+    if args.iter().any(|arg| arg == "--shell") {
+        let settings = Settings::load().unwrap_or_default();
+        return app::run(&settings.terminal);
+    }
     if args.iter().any(|arg| arg == "--help") {
         println!(
-            "October Lantern\n--check-sidecar   Verify the Rust engine\n--check-desktop   Verify desktop portals\n--install-launcher   Install the application launcher\n--snapshot FILE   Render a preview\n--fixture FILE.json [--out FILE.png] [--scale 1|2]   Render one surface from a saved model\n--settings | --connections | --ask | --help-page | --welcome | --new-session | --compact"
+            "October Lantern\n--check-sidecar   Verify the Rust engine\n--check-desktop   Verify desktop portals\n--install-launcher   Install the application launcher\n--snapshot FILE   Render a preview\n--fixture FILE.json [--out FILE.png] [--scale 1|2]   Render one surface from a saved model\n--shell   The Mac-parity pill and panel (in progress)\n--settings | --connections | --ask | --help-page | --welcome | --new-session | --compact"
         );
         return Ok(());
     }

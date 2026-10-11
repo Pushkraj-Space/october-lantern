@@ -13,6 +13,11 @@ pub use linux::*;
 mod windows;
 #[cfg(windows)]
 pub use windows::*;
+pub mod shell;
+#[cfg(windows)]
+mod shell_win;
+#[cfg(target_os = "linux")]
+mod shell_x11;
 
 pub enum Event {
     Status(String),

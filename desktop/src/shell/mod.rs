@@ -4,6 +4,8 @@
 // The new UI path is built while the legacy UI is still the default (CONTRACT §10).
 #![allow(dead_code)]
 
+pub mod pill;
+
 use crate::model::Edge;
 use eframe::egui::{Pos2, Rect, Vec2, pos2, vec2};
 
