@@ -19,8 +19,10 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx, agent: &Agent, max_height: f32) {
                 cx.emit(UiAction::CloseChat);
             }
             c::agent_badge(ui, cx.assets, agent, 24.0);
-            let width = (ui.available_width() - 144.0).max(30.0);
+            let open_width = ui.painter().layout_no_wrap("Open".into(), t::font(11.0, Weight::Medium), t::MUTED).size().x + 31.0;
+            let width = (ui.available_width() - c::state_chip_width(ui, agent) - open_width - 20.0).max(30.0);
             ui.allocate_ui_with_layout(egui::vec2(width, 28.0), Layout::top_down(Align::Min), |ui| {
+                ui.set_min_width(width);
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.add(egui::Label::new(c::text(format!("@{}", agent.handle), 13.0, Weight::Semibold, t::INK)).truncate());
                 let subtitle = agent

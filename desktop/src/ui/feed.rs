@@ -121,18 +121,18 @@ fn tab(ui: &mut Ui, cx: &mut Ctx, title: &str, count: usize, selected: bool, pan
             tracking_label(ui, title, 11.0, if selected { t::INK } else { t::MUTED });
             if count > 0 {
                 let waiting = selected && panel == PanelMode::Inbox;
-                egui::Frame::new()
-                    .fill(if waiting { t::opacity(t::AMBER, 0.25) } else { t::FAINT })
-                    .corner_radius(20)
-                    .inner_margin(Margin::symmetric(6, 1))
-                    .show(ui, |ui| {
-                        c::label(ui, count.to_string(), 10.0, Weight::Rounded, if waiting { t::AMBER } else { t::MUTED });
-                    });
+                let color = if waiting { t::AMBER } else { t::MUTED };
+                let galley = ui.painter().layout_no_wrap(count.to_string(), t::font(10.0, Weight::Rounded), color);
+                let (rect, _) = ui.allocate_exact_size(galley.size() + egui::vec2(12.0, 2.0), Sense::hover());
+                ui.painter().rect_filled(rect, rect.height() / 2.0, if waiting { t::opacity(t::AMBER, 0.25) } else { t::FAINT });
+                ui.painter().galley(rect.min + egui::vec2(6.0, 1.0), galley, color);
             }
         })
         .response
         .interact(Sense::click());
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, title));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, format!("{title}, {count}"))
+    });
     if response.clicked() {
         cx.emit(UiAction::SetPanel(Some(panel)));
     }
@@ -184,6 +184,7 @@ fn card(ui: &mut Ui, cx: &mut Ctx, agent: &Agent, is_new: bool) {
                         let right = if is_new { 104.0 } else { 75.0 };
                         let width = (ui.available_width() - right - 10.0).max(40.0);
                         ui.allocate_ui_with_layout(egui::vec2(width, 30.0), Layout::top_down(Align::Min), |ui| {
+                            ui.set_min_width(width);
                             ui.spacing_mut().item_spacing.y = 1.0;
                             ui.add(egui::Label::new(c::text(format!("@{}", agent.handle), 13.0, Weight::Semibold, t::INK)).truncate());
                             ui.add(
@@ -196,22 +197,20 @@ fn card(ui: &mut Ui, cx: &mut Ctx, agent: &Agent, is_new: bool) {
                                 .truncate(),
                             );
                         });
-                        ui.allocate_ui_with_layout(egui::vec2(right, 30.0), Layout::top_down(Align::Max), |ui| {
-                            ui.spacing_mut().item_spacing.y = 2.0;
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
-                                if is_new {
-                                    egui::Frame::new().fill(t::AMBER).corner_radius(20).inner_margin(Margin::symmetric(5, 1)).show(
-                                        ui,
-                                        |ui| {
-                                            c::label(ui, "NEW", 9.0, Weight::Bold, t::black(0.8));
-                                        },
-                                    );
-                                }
-                                c::state_chip(ui, agent);
-                            });
-                            c::label(ui, c::time_ago(agent.state_since, cx.env.now_ms), 10.0, Weight::Regular, t::MUTED);
+                        let (rect, status) = ui.allocate_exact_size(egui::vec2(right, 30.0), Sense::hover());
+                        status.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Label,
+                                ui.is_enabled(),
+                                format!(
+                                    "{}{}, {}",
+                                    if is_new { "New, " } else { "" },
+                                    if agent.is_live() { t::state_label(agent.state) } else { "Recent" },
+                                    c::time_ago(agent.state_since, cx.env.now_ms)
+                                ),
+                            )
                         });
+                        card_status(ui, cx, agent, is_new, rect);
                     });
                     if let Some(title) = &agent.title {
                         ui.add(egui::Label::new(c::text(title, 12.0, Weight::Medium, t::white(0.75))).truncate());
@@ -262,6 +261,41 @@ fn card(ui: &mut Ui, cx: &mut Ctx, agent: &Agent, is_new: bool) {
     if response.clicked() && cx.out.len() == before {
         cx.emit(UiAction::OpenChat { agent_id: agent.id.clone() });
     }
+}
+
+/// Explicit trailing geometry avoids egui inheriting RTL from a trailing-aligned VStack.
+fn card_status(ui: &mut Ui, cx: &Ctx, agent: &Agent, is_new: bool, rect: egui::Rect) {
+    let color = if agent.state.wants_you() { t::AMBER } else { t::MUTED };
+    let state = if agent.is_live() { t::state_label(agent.state) } else { "Recent" };
+    let galley = ui.painter().layout_no_wrap(state.into(), t::font(11.0, Weight::Medium), color);
+    let state_left = rect.right() - galley.size().x;
+    let center_y = rect.top() + 7.0;
+    if !agent.is_live() {
+        let recent = ui.painter().layout_no_wrap("Recent".into(), t::font(10.5, Weight::Medium), t::MUTED);
+        let size = recent.size() + egui::vec2(14.0, 4.0);
+        let capsule = egui::Rect::from_min_size(egui::pos2(rect.right() - size.x, center_y - size.y / 2.0), size);
+        ui.painter().rect_filled(capsule, size.y / 2.0, t::FAINT);
+        ui.painter().galley(capsule.min + egui::vec2(7.0, 2.0), recent, t::MUTED);
+    } else {
+        ui.painter().galley(egui::pos2(state_left, center_y - galley.size().y / 2.0), galley, color);
+    }
+    let dot = state_left - 8.0;
+    if agent.is_live() {
+        ui.painter().circle_filled(egui::pos2(dot, center_y), 3.0, t::state_color(agent.state));
+    }
+    if is_new {
+        let job = egui::text::LayoutJob::single_section(
+            "NEW".into(),
+            egui::TextFormat { font_id: t::font(9.0, Weight::Bold), color: t::black(0.8), extra_letter_spacing: 0.5, ..Default::default() },
+        );
+        let new = ui.painter().layout_job(job);
+        let size = new.size() + egui::vec2(10.0, 2.0);
+        let capsule = egui::Rect::from_min_size(egui::pos2(dot - 3.0 - 6.0 - size.x, center_y - size.y / 2.0), size);
+        ui.painter().rect_filled(capsule, size.y / 2.0, t::AMBER);
+        ui.painter().galley(capsule.min + egui::vec2(5.0, 1.0), new, t::black(0.8));
+    }
+    let age = ui.painter().layout_no_wrap(c::time_ago(agent.state_since, cx.env.now_ms), t::font(10.0, Weight::Regular), t::MUTED);
+    ui.painter().galley(egui::pos2(rect.right() - age.size().x, rect.bottom() - age.size().y), age, t::MUTED);
 }
 
 pub fn request_detail(ui: &mut Ui, cx: &mut Ctx, agent: &Agent) {
@@ -324,8 +358,9 @@ fn row(ui: &mut Ui, cx: &mut Ctx, agent: &Agent) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 c::agent_badge(ui, cx.assets, agent, 26.0);
-                let width = (ui.available_width() - 86.0).max(30.0);
+                let width = (ui.available_width() - c::state_chip_width(ui, agent) - 10.0).max(30.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, 30.0), Layout::top_down(Align::Min), |ui| {
+                    ui.set_min_width(width);
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.horizontal(|ui| {
                         c::label(ui, format!("@{}", agent.handle), 13.0, Weight::Semibold, t::INK);

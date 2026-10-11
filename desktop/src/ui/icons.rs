@@ -11,6 +11,7 @@ pub enum Icon {
     Close,
     Back,
     ChevronDown,
+    ChevronRight,
     ChevronUpDown,
     Reply,
     Open,
@@ -136,6 +137,7 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Back => p.line(&[(15.0, 4.0), (7.0, 12.0), (15.0, 20.0)]),
         ChevronDown => p.line(&[(6.0, 9.0), (12.0, 15.0), (18.0, 9.0)]),
+        ChevronRight => p.line(&[(9.0, 5.0), (16.0, 12.0), (9.0, 19.0)]),
         ChevronUpDown => {
             p.line(&[(8.0, 8.0), (12.0, 4.0), (16.0, 8.0)]);
             p.line(&[(8.0, 16.0), (12.0, 20.0), (16.0, 16.0)]);

@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 pub mod assets;
+mod assistant;
 mod chat;
 pub mod components;
 mod composer;
@@ -49,6 +50,10 @@ pub struct UiState {
     pub model_search_kind: Option<AgentKind>,
     #[serde(skip)]
     pub capture_texture: sessions::CaptureTexture,
+    #[serde(skip)]
+    pub assistant_focus: Option<u64>,
+    #[serde(skip)]
+    pub assistant_scroll_anchor: Option<(u64, u64)>,
 }
 
 pub struct Ctx<'a> {
@@ -242,7 +247,7 @@ pub fn render_panel(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32) -> f32 {
                 placeholder(ui, cx, max_height, "October");
             }
             Some(PanelMode::Assistant) => {
-                placeholder(ui, cx, max_height, "Ask Lantern");
+                assistant::render(ui, cx, max_height);
             }
             _ => {
                 if let Some(preview) = &cx.model.launch_preview {
@@ -385,12 +390,62 @@ mod tests {
             include_str!("../../fixtures/panel-new-session-permission.json"),
             include_str!("../../fixtures/panel-new-session-loading.json"),
             include_str!("../../fixtures/panel-new-session-no-agents.json"),
+            include_str!("../../fixtures/panel-assistant-home.json"),
+            include_str!("../../fixtures/panel-assistant-signed-out.json"),
+            include_str!("../../fixtures/panel-assistant-thread.json"),
+            include_str!("../../fixtures/panel-assistant-thinking.json"),
+            include_str!("../../fixtures/panel-assistant-error.json"),
         ] {
             let mut fixture: crate::app::fixture::Fixture = serde_json::from_str(raw).unwrap();
             let (height, actions, _) = frame(&ctx, &assets, &fixture.model, &mut fixture.inputs, &mut UiState::default(), Vec::new());
             assert!(height > 60.0 && height <= 900.0);
             assert!(actions.is_empty());
         }
+    }
+
+    #[test]
+    fn card_status_is_trailing_aligned_and_new_precedes_the_state() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let assets = Assets::load(&ctx);
+        let mut fixture: crate::app::fixture::Fixture = serde_json::from_str(include_str!("../../fixtures/panel-inbox.json")).unwrap();
+        let mut view = UiState::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(380.0, 1032.0))),
+                ..Default::default()
+            },
+            |ui| {
+                render_panel(
+                    ui,
+                    &mut Ctx {
+                        model: &fixture.model,
+                        inputs: &mut fixture.inputs,
+                        view: &mut view,
+                        out: &mut Vec::new(),
+                        assets: &assets,
+                        env: &Env { now_ms: fixture.now_ms, ..Default::default() },
+                    },
+                    1032.0,
+                );
+            },
+        );
+        output.textures_delta.clear();
+        let texts: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some((&t.galley.job.text, egui::Rect::from_min_size(t.pos, t.galley.size()))),
+                _ => None,
+            })
+            .collect();
+        let state = texts.iter().find(|(text, _)| text.as_str() == "Your turn").unwrap().1;
+        let new = texts.iter().find(|(text, _)| text.as_str() == "NEW").unwrap().1;
+        let age = texts.iter().find(|(text, _)| text.as_str() == "38m").unwrap().1;
+        assert!(new.right() < state.left());
+        assert!((state.right() - 356.0).abs() < 0.1, "state edge: {}", state.right());
+        assert!((age.right() - state.right()).abs() < 0.1);
+        output.textures_delta.clear();
     }
 
     #[test]

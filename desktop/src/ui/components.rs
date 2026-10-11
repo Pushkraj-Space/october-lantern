@@ -82,7 +82,7 @@ pub fn glass_shape(rect: Rect, radius: f32, tint: f32) -> Shape {
     let alpha = 1.0 - (1.0 - tint.clamp(0.0, 1.0)) * 0.65;
     let mut shapes = vec![Shape::rect_filled(rect, radius, theme::black(alpha))];
     let perimeter = rounded_points(rect.shrink(0.5), radius.min(rect.width() / 2.0).min(rect.height() / 2.0));
-    let color = |y: f32, rim: bool| {
+    let color = move |y: f32, rim: bool| {
         let t = ((y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
         let a = if rim {
             if t <= 0.5 { 0.42 + (0.10 - 0.42) * t * 2.0 } else { 0.10 + (0.18 - 0.10) * (t - 0.5) * 2.0 }
@@ -93,18 +93,24 @@ pub fn glass_shape(rect: Rect, radius: f32, tint: f32) -> Shape {
     };
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.center(), Color32::TRANSPARENT);
-    for point in &perimeter {
+    // Restrict sheen triangulation to the top half. A full-perimeter fan incorrectly spreads
+    // highlights diagonally below the midpoint rather than drawing Swift's vertical gradient.
+    let mut top = perimeter[..13].to_vec();
+    top.push(egui::pos2(rect.right() - 0.5, rect.center().y));
+    top.push(egui::pos2(rect.left() + 0.5, rect.center().y));
+    top.extend_from_slice(&perimeter[perimeter.len() - 13..]);
+    for point in &top {
         mesh.colored_vertex(*point, color(point.y, false));
     }
-    for i in 0..perimeter.len() {
-        mesh.add_triangle(0, i as u32 + 1, ((i + 1) % perimeter.len()) as u32 + 1);
+    for i in 0..top.len() {
+        mesh.add_triangle(0, i as u32 + 1, ((i + 1) % top.len()) as u32 + 1);
     }
     shapes.push(Shape::mesh(mesh));
-    for i in 0..perimeter.len() {
-        let a = perimeter[i];
-        let b = perimeter[(i + 1) % perimeter.len()];
-        shapes.push(Shape::line_segment([a, b], Stroke::new(1.0, color((a.y + b.y) * 0.5, true))));
-    }
+    // One closed, feathered path: separate antialiased segments produce bright join seams.
+    shapes.push(Shape::Path(egui::epaint::PathShape::closed_line(
+        perimeter,
+        egui::epaint::PathStroke::new_uv(1.0, move |_, pos| color(pos.y, true)),
+    )));
     Shape::Vec(shapes)
 }
 
@@ -153,20 +159,25 @@ pub fn agent_badge(ui: &mut Ui, assets: &Assets, agent: &Agent, size: f32) -> Re
 
 pub fn state_chip(ui: &mut Ui, agent: &Agent) -> Response {
     if !agent.is_live() {
-        return egui::Frame::new()
-            .fill(theme::FAINT)
-            .corner_radius(20)
-            .inner_margin(egui::Margin::symmetric(7, 2))
-            .show(ui, |ui| label(ui, "Recent", 10.5, Weight::Medium, theme::MUTED))
-            .response;
+        let galley = ui.painter().layout_no_wrap("Recent".into(), theme::font(10.5, Weight::Medium), theme::MUTED);
+        let (rect, response) = ui.allocate_exact_size(galley.size() + egui::vec2(14.0, 4.0), Sense::hover());
+        ui.painter().rect_filled(rect, rect.height() / 2.0, theme::FAINT);
+        ui.painter().galley(rect.min + egui::vec2(7.0, 2.0), galley, theme::MUTED);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), "Recent"));
+        return response;
     }
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 5.0;
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(6.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 3.0, theme::state_color(agent.state));
-        label(ui, theme::state_label(agent.state), 11.0, Weight::Medium, if agent.state.wants_you() { theme::AMBER } else { theme::MUTED });
-    })
-    .response
+    let color = if agent.state.wants_you() { theme::AMBER } else { theme::MUTED };
+    let galley = ui.painter().layout_no_wrap(theme::state_label(agent.state).into(), theme::font(11.0, Weight::Medium), color);
+    let (rect, response) = ui.allocate_exact_size(galley.size() + egui::vec2(11.0, 0.0), Sense::hover());
+    ui.painter().circle_filled(egui::pos2(rect.left() + 3.0, rect.center().y), 3.0, theme::state_color(agent.state));
+    ui.painter().galley(rect.min + egui::vec2(11.0, 0.0), galley, color);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), theme::state_label(agent.state)));
+    response
+}
+
+pub fn state_chip_width(ui: &Ui, agent: &Agent) -> f32 {
+    let (title, size, padding) = if agent.is_live() { (theme::state_label(agent.state), 11.0, 11.0) } else { ("Recent", 10.5, 14.0) };
+    ui.painter().layout_no_wrap(title.into(), theme::font(size, Weight::Medium), theme::MUTED).size().x + padding
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -184,7 +195,17 @@ impl Default for MarkdownStyle {
 /// Inline-only, preserving whitespace like Swift's AttributedString. Full chat block rendering
 /// uses `blocks` below instead of feeding arbitrary agent HTML to a renderer.
 pub fn markdown(ui: &mut Ui, source: &str, style: MarkdownStyle) -> Response {
+    markdown_spaced(ui, source, style, 0.0)
+}
+
+pub fn markdown_spaced(ui: &mut Ui, source: &str, style: MarkdownStyle, line_spacing: f32) -> Response {
     let mut job = inline_job(source, style);
+    if line_spacing > 0.0 {
+        let height = ui.fonts_mut(|fonts| fonts.row_height(&theme::font(style.size, Weight::Regular))) + line_spacing;
+        for section in &mut job.sections {
+            section.format.line_height = Some(height);
+        }
+    }
     job.wrap.max_width = ui.available_width();
     job.wrap.max_rows = style.max_rows;
     ui.add(Label::new(job).selectable(true))
@@ -317,6 +338,7 @@ pub fn blocks(ui: &mut Ui, source: &str, id: Id) -> Option<String> {
                 }
                 Block::Item { marker, text: body } => {
                     ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
                         label(ui, marker, 12.5, Weight::Regular, theme::MUTED);
                         markdown(ui, &body, MarkdownStyle::default());
                     });
@@ -391,6 +413,7 @@ mod tests {
                         Close,
                         Back,
                         ChevronDown,
+                        ChevronRight,
                         ChevronUpDown,
                         Reply,
                         Open,
@@ -459,5 +482,23 @@ mod tests {
         assert_eq!(time_ago(None, 1000.0), "");
         assert_eq!(time_ago(Some(2000.0), 1000.0), "now");
         assert_eq!(time_ago(Some(0.0), 3600000.0), "1h");
+    }
+
+    #[test]
+    fn glass_has_a_single_closed_rim_and_sheen_stops_at_midpoint() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(380.0, 500.0));
+        let Shape::Vec(shapes) = glass_shape(rect, 22.0, 0.5) else {
+            panic!("glass layers");
+        };
+        assert_eq!(shapes.len(), 3);
+        let Shape::Mesh(sheen) = &shapes[1] else {
+            panic!("sheen mesh");
+        };
+        assert!(sheen.vertices.iter().all(|vertex| vertex.pos.y <= rect.center().y));
+        let Shape::Path(rim) = &shapes[2] else {
+            panic!("rim path");
+        };
+        assert!(rim.closed);
+        assert_eq!(rim.stroke.width, 1.0);
     }
 }

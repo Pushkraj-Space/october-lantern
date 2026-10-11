@@ -519,15 +519,20 @@ fn context(ui: &mut Ui, cx: &mut Ctx) {
 }
 
 pub fn switch(ui: &mut Ui, title: &str, value: &mut bool) -> Response {
-    let (rect, mut response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::click());
+    let galley = ui.painter().layout_no_wrap(title.into(), t::font(12.5, Weight::Regular), t::white(0.9));
+    let (rect, mut response) =
+        ui.allocate_exact_size(egui::vec2((galley.size().x + 8.0 + 44.0).min(ui.available_width()), 20.0), Sense::click());
     if response.clicked() {
         *value = !*value;
         response.mark_changed();
     }
-    let track = Rect::from_center_size(egui::pos2(rect.right() - 13.0, rect.center().y), egui::vec2(26.0, 15.0));
-    ui.painter().rect_filled(track, 7.5, if *value { t::AMBER } else { t::white(0.2) });
-    ui.painter().circle_filled(egui::pos2(if *value { track.right() - 7.5 } else { track.left() + 7.5 }, track.center().y), 5.5, t::INK);
-    let galley = ui.painter().layout_no_wrap(title.into(), t::font(12.5, Weight::Regular), t::white(0.9));
+    let track = Rect::from_center_size(egui::pos2(rect.right() - 22.0, rect.center().y), egui::vec2(44.0, 20.0));
+    ui.painter().rect_filled(track, 10.0, if *value { egui::Color32::from_rgb(0, 122, 255) } else { t::white(0.2) });
+    let knob = Rect::from_center_size(
+        egui::pos2(if *value { track.right() - 14.0 } else { track.left() + 14.0 }, track.center().y),
+        egui::vec2(24.0, 16.0),
+    );
+    ui.painter().rect_filled(knob, 8.0, t::INK);
     ui.painter().galley(egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, t::INK);
     if response.has_focus() {
         ui.painter().rect_stroke(track.expand(2.0), 9.0, Stroke::new(1.0, t::AMBER), egui::StrokeKind::Inside);
