@@ -57,9 +57,14 @@ pub fn glass_surface(ui: &mut Ui, rect: Rect, radius: f32, tint: f32) {
 }
 
 pub fn paint_glass(painter: &Painter, rect: Rect, radius: f32, tint: f32) {
+    painter.add(glass_shape(rect, radius, tint));
+}
+
+/// Reserved-slot version, for surfaces whose measured height is only known after layout.
+pub fn glass_shape(rect: Rect, radius: f32, tint: f32) -> Shape {
     // Swift's glassSurface adds .35 black over GlassContainer's native tint.
     let alpha = 1.0 - (1.0 - tint.clamp(0.0, 1.0)) * 0.65;
-    painter.rect_filled(rect, radius, theme::black(alpha));
+    let mut shapes = vec![Shape::rect_filled(rect, radius, theme::black(alpha))];
     let perimeter = rounded_points(rect.shrink(0.5), radius.min(rect.width() / 2.0).min(rect.height() / 2.0));
     let color = |y: f32, rim: bool| {
         let t = ((y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
@@ -78,12 +83,13 @@ pub fn paint_glass(painter: &Painter, rect: Rect, radius: f32, tint: f32) {
     for i in 0..perimeter.len() {
         mesh.add_triangle(0, i as u32 + 1, ((i + 1) % perimeter.len()) as u32 + 1);
     }
-    painter.add(Shape::mesh(mesh));
+    shapes.push(Shape::mesh(mesh));
     for i in 0..perimeter.len() {
         let a = perimeter[i];
         let b = perimeter[(i + 1) % perimeter.len()];
-        painter.line_segment([a, b], Stroke::new(1.0, color((a.y + b.y) * 0.5, true)));
+        shapes.push(Shape::line_segment([a, b], Stroke::new(1.0, color((a.y + b.y) * 0.5, true))));
     }
+    Shape::Vec(shapes)
 }
 
 fn rounded_points(rect: Rect, radius: f32) -> Vec<Pos2> {
@@ -304,7 +310,7 @@ pub fn blocks(ui: &mut Ui, source: &str, id: Id) -> Option<String> {
                         .fill(theme::black(0.3))
                         .stroke(Stroke::new(1.0, theme::HAIRLINE))
                         .corner_radius(8)
-                        .inner_margin(8)
+                        .inner_margin(7)
                         .show(ui, |ui| {
                             ui.horizontal_top(|ui| {
                                 let width = (ui.available_width() - 24.0).max(0.0);

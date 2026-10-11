@@ -1,0 +1,14 @@
+{
+  "surface": "panel", "maxHeight": 1032, "nowMs": 1790000000000, "home": "/home/me", "reduceMotion": true,
+  "model": {
+    "engine": {"state": "ready"}, "panel": "agents",
+    "agents": [{"id": "claude:1:1", "kind": "claude", "handle": "claude-1", "state": "working", "title": "Find my passport scan", "canReply": true, "route": {"via": "tmux"}}],
+    "chat": {"agent_id": "claude:1:1", "supported": true, "messages": [
+      {"role": "user", "text": "Find my passport scan and tell me where it is.\n\n(Started from October Lantern on Linux.)", "at": "2026-09-21T00:00:00Z"},
+      {"role": "agent", "text": "I'll look in your Documents folder and check likely filenames.", "at": "2026-09-21T00:00:01Z"},
+      {"role": "tool", "text": "Searching Documents for passport scans"},
+      {"role": "agent", "text": "## Found it\n\nYour scan is in `Documents/Travel/passport.pdf`.\n\n- It is a PDF.\n- The filename matches your request.\n\n```text\n/home/me/Documents/Travel/passport.pdf\n```"}
+    ]}
+  },
+  "inputs": {"drafts": {"recipient": "claude:1:1", "drafts": {"claude:1:1": {"text": "Thank you!", "revision": 1}}, "next_revision": 1}}
+}

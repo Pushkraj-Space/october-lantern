@@ -1,0 +1,13 @@
+{
+  "surface": "panel", "maxHeight": 1032, "nowMs": 1790000000000, "home": "/home/me", "reduceMotion": true,
+  "model": {
+    "engine": {"state": "ready"}, "panel": "agents",
+    "agents": [
+      {"id": "claude:1:1", "kind": "claude", "handle": "claude-1", "state": "needs_input", "cwd": "/home/me/projects/lantern", "title": "Review the launch flow", "route": {"via": "tmux"}, "tmux": {"target": "claude-lantern:0.0"}},
+      {"id": "codex:2:1", "kind": "codex", "handle": "codex-2", "state": "waiting", "cwd": "/home/me/projects/desktop", "host": {"app": "Terminal"}},
+      {"id": "gemini:3:1", "kind": "gemini", "handle": "gemini-3", "state": "working", "cwd": "/home/me/Documents", "host": {"app": "Terminal"}},
+      {"id": "pi:4:1", "kind": "pi", "handle": "pi-4", "state": "idle", "cwd": "/home/me/projects/tools"},
+      {"id": "codex:5:1", "kind": "codex", "handle": "codex-5", "state": "idle", "live": false, "source": "Codex app"}
+    ]
+  }
+}

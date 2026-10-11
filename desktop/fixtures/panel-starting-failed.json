@@ -1,0 +1,4 @@
+{
+  "surface": "panel", "maxHeight": 1032, "nowMs": 1790000000000, "home": "/home/me", "reduceMotion": true,
+  "model": {"engine": {"state": "ready"}, "panel": "inbox", "launch_preview": {"kind": "claude", "prompt": "Find my passport scan and tell me where it is.\n\n(Started from October Lantern on Linux.)", "folder": "/home/me", "error": "tmux exited before the agent started."}}
+}
