@@ -273,6 +273,8 @@ private struct TurnView: View {
 /// start an agent.
 struct AskBox: View {
     @ObservedObject var model: AppModel
+    /// Lantern's home uses a bigger box.
+    var large = false
     @ObservedObject var assistant = Assistant.shared
     @ObservedObject var dictation = Assistant.shared.dictation
     @ObservedObject var account = OctoberAccount.shared
@@ -284,7 +286,7 @@ struct AskBox: View {
                 HStack(alignment: .bottom, spacing: 6) {
                     TextField(dictation.isRecording ? "Listening…" : assistant.turns.isEmpty ? "Ask Lantern, or tell it what to do" : "Ask a follow-up",
                               text: $assistant.text, axis: .vertical)
-                        .textFieldStyle(.plain).font(.system(size: 13)).lineLimit(1...6)
+                        .textFieldStyle(.plain).font(.system(size: large ? 15 : 13)).lineLimit(large ? 2...6 : 1...6)
                         .focused($focused)
                         .onSubmit { assistant.submit() }
                     Button {
@@ -301,7 +303,7 @@ struct AskBox: View {
                     }
                     .buttonStyle(.plain).disabled(!canSubmit).help("Ask (Return)")
                 }
-                .padding(.leading, 11).padding(.trailing, 6).padding(.vertical, 7)
+                .padding(.leading, large ? 14 : 11).padding(.trailing, 8).padding(.vertical, large ? 11 : 7)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.3)))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(focused ? Theme.amber.opacity(0.5) : Theme.stroke))
             } else {
@@ -330,6 +332,13 @@ struct AskBox: View {
 
 /// Lantern's home (click the lantern): Ask Lantern. What's waiting is on the stack button.
 struct AssistantHome: View {
+    static let ideas: [(symbol: String, text: String)] = [
+        ("square.stack.3d.up", "What are my agents doing?"),
+        ("wifi", "Fix the Wi-Fi."),
+        ("video", "Join the call."),
+        ("photo", "Find that photo."),
+    ]
+
     @ObservedObject var model: AppModel
     @ObservedObject var assistant = Assistant.shared
     @ObservedObject var account = OctoberAccount.shared
@@ -341,7 +350,7 @@ struct AssistantHome: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text("ASK LANTERN").font(.system(size: 11, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.ink)
+                        Text("Ask Lantern").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.ink)
                         Spacer()
                         Button { model.panel = nil } label: {
                             Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted).frame(width: 22, height: 22)
@@ -349,22 +358,27 @@ struct AssistantHome: View {
                         .buttonStyle(.plain).keyboardShortcut(.cancelAction).help("Close")
                     }
                     if account.signedIn {
-                        Text("Ask anything about your agents, or tell Lantern what to do and it starts an agent on it.")
-                            .font(.system(size: 11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                        ForEach(["What are my agents doing?", "Which agent needs me first, and why?", "Add tests for the last change in this repo"], id: \.self) { idea in
-                            Button { assistant.text = idea } label: {
-                                Text(idea).font(.system(size: 12)).foregroundStyle(Theme.ink.opacity(0.85)).lineLimit(1)
-                                    .padding(.horizontal, 10).padding(.vertical, 6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.faint))
+                        Text("Ask anything, or tell Lantern what to do and an agent gets on it.")
+                            .font(.system(size: 13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                            .padding(.bottom, 2)
+                        ForEach(Self.ideas, id: \.text) { idea in
+                            Button { assistant.text = idea.text } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: idea.symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.amber)
+                                        .frame(width: 22)
+                                    Text(idea.text).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink.opacity(0.9))
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Theme.faint))
                             }
                             .buttonStyle(.plain)
                         }
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+                .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
             }
-            AskBox(model: model)
+            AskBox(model: model, large: true)
         }
         .onAppear { model.composeFocusToken += 1 }
     }
