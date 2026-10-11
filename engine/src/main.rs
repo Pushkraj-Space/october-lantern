@@ -51,7 +51,14 @@ fn main() -> Result<()> {
         Some("console-type") => {
             let number = |i: usize| args.get(i).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
             let text = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
-            console::type_into(number(1) as u32, number(2), text(3), text(4), text(5))
+            match console::type_into(number(1) as u32, number(2), text(3), text(4), text(5)) {
+                // Keys may be in the console: say so with the exit code, not as a plain failure.
+                Err(error) if error.downcast_ref::<deliver::Uncertain>().is_some() => {
+                    eprintln!("{error:#}");
+                    std::process::exit(console::UNCERTAIN_EXIT)
+                }
+                other => other,
+            }
         }
         Some("agents") | None => {
             let agents = scanner::Scanner::new().scan();

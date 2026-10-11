@@ -40,17 +40,55 @@ pub fn keys(mode: &str, payload: &str) -> Option<Vec<Key>> {
 }
 
 /// Every process on the console must be the helper, the agent, one of the agent's ancestors, or
-/// the agent's own native program under it (`native`: Codex's npm wrapper runs `codex.exe`).
+/// the agent's own native program under it (`native`: Codex's npm wrapper runs its codex binary).
 #[cfg(any(windows, test))]
 pub fn others_on_console(attached: &[u32], helper: u32, agent: u32, ancestors: &[u32], native: impl Fn(u32) -> bool) -> Vec<u32> {
     attached.iter().copied().filter(|pid| *pid != helper && *pid != agent && !ancestors.contains(pid) && !native(*pid)).collect()
 }
 
-/// The program an agent of this kind runs natively under a wrapper ("" for none).
-pub fn native_program(kind: crate::model::Kind) -> &'static str {
+/// The exact file names of the program an agent runs natively under a wrapper (Codex's npm
+/// package runs its platform binary), by the helper's `kind` argument. Nothing else may share the
+/// console, not even another `codex-*` tool.
+#[cfg(any(windows, test))]
+pub fn native_programs(kind: &str) -> &'static [&'static str] {
     match kind {
-        crate::model::Kind::Codex => "codex",
-        _ => "",
+        "codex" => &["codex.exe", "codex-x86_64-pc-windows-msvc.exe", "codex-aarch64-pc-windows-msvc.exe"],
+        _ => &[],
+    }
+}
+
+/// The helper's exit code when some of the text may have gone in: the engine reports the delivery
+/// as uncertain, never as a failure that's safe to retry.
+pub const UNCERTAIN_EXIT: i32 = 3;
+
+/// How much of a write reached the console.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Written {
+    All,
+    Nothing,
+    Part,
+}
+
+/// What a delivery amounts to: the text (or key), then Enter for text (`entered` is `None` for a
+/// single key). Anything that may have put keys in the console without completing is uncertain.
+#[cfg(any(windows, test))]
+pub fn outcome(typed: Written, entered: Option<Written>) -> Result<()> {
+    let uncertain = |message: &str| Err(crate::deliver::Uncertain(message.into()).into());
+    match (typed, entered) {
+        (Written::Nothing, _) => anyhow::bail!("couldn't type into the agent's console"),
+        (Written::Part, _) => uncertain("only part of it went in; check the agent's terminal before sending again"),
+        (Written::All, None | Some(Written::All)) => Ok(()),
+        (Written::All, Some(_)) => uncertain("the text went in but Enter didn't"),
+    }
+}
+
+/// The helper's result, from its exit: uncertain and failed stay distinct across the process.
+pub fn from_exit(code: Option<i32>, stderr: &str) -> Result<()> {
+    match code {
+        Some(0) => Ok(()),
+        Some(UNCERTAIN_EXIT) => Err(crate::deliver::Uncertain(stderr.trim().to_string()).into()),
+        _ => anyhow::bail!("{}", if stderr.trim().is_empty() { "couldn't type into the agent's console" } else { stderr.trim() }),
     }
 }
 
@@ -58,17 +96,24 @@ pub fn native_program(kind: crate::model::Kind) -> &'static str {
 pub fn send(agent: &crate::model::Agent, mode: &str, payload: &str) -> Result<()> {
     let exe = std::env::current_exe()?;
     let (pid, start) = (agent.pid.to_string(), agent.start_time.to_string());
+    let kind = if agent.kind == crate::model::Kind::Codex { "codex" } else { "" };
     let out = crate::run::output(
-        std::process::Command::new(exe).args(["console-type", &pid, &start, native_program(agent.kind), mode, payload]),
+        std::process::Command::new(exe).args(["console-type", &pid, &start, kind, mode, payload]),
         std::time::Duration::from_secs(5),
-    )?;
-    anyhow::ensure!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr).trim());
-    Ok(())
+    );
+    match out {
+        Ok(out) => from_exit(out.status.code(), &String::from_utf8_lossy(&out.stderr)),
+        // Killed while it may have been typing.
+        Err(error) if error.downcast_ref::<crate::run::TimedOut>().is_some() => {
+            Err(crate::deliver::Uncertain(format!("Lantern's typing helper {error}; check the agent's terminal")).into())
+        }
+        Err(error) => Err(error),
+    }
 }
 
-/// The helper: `lantern-engine console-type <pid> <start> <native program> text|key <payload>`.
+/// The helper: `lantern-engine console-type <pid> <start> <agent kind> text|key <payload>`.
 #[cfg(windows)]
-pub fn type_into(pid: u32, start: u64, program: &str, mode: &str, payload: &str) -> Result<()> {
+pub fn type_into(pid: u32, start: u64, kind: &str, mode: &str, payload: &str) -> Result<()> {
     use anyhow::{Context, bail};
     use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
@@ -100,12 +145,13 @@ pub fn type_into(pid: u32, start: u64, program: &str, mode: &str, payload: &str)
         if !attached.contains(&pid) {
             bail!("the agent is no longer on its console");
         }
+        let allowed = native_programs(kind);
         let native = |other: u32| {
-            !program.is_empty()
+            !allowed.is_empty()
                 && crate::procs::ancestors_of(other).contains(&pid)
                 && crate::procs::live(other)
                     .and_then(|l| l.exe)
-                    .is_some_and(|exe| exe.rsplit(['\\', '/']).next().unwrap_or(&exe).to_lowercase().starts_with(program))
+                    .is_some_and(|exe| allowed.contains(&exe.rsplit(['\\', '/']).next().unwrap_or(&exe).to_lowercase().as_str()))
         };
         if !others_on_console(&attached, std::process::id(), pid, &ancestors, native).is_empty() {
             bail!("something else is running in the agent's terminal, so Lantern won't type there now");
@@ -144,24 +190,23 @@ pub fn type_into(pid: u32, start: u64, program: &str, mode: &str, payload: &str)
                 })
                 .collect()
         };
-        let write = |records: &[INPUT_RECORD]| -> bool {
+        let write = |records: &[INPUT_RECORD]| -> Written {
             let mut written = 0u32;
-            unsafe {
-                WriteConsoleInputW(input, records.as_ptr(), records.len() as u32, &mut written) != 0 && written as usize == records.len()
+            let ok = unsafe { WriteConsoleInputW(input, records.as_ptr(), records.len() as u32, &mut written) } != 0;
+            match written as usize {
+                n if ok && n == records.len() => Written::All,
+                0 => Written::Nothing,
+                _ => Written::Part,
             }
         };
         let typed = write(&records(&keys));
         // Like a paste followed by Return, so the agent reads the text before it submits.
-        let entered = typed && mode == "text" && {
+        let entered = (typed == Written::All && mode == "text").then(|| {
             std::thread::sleep(std::time::Duration::from_millis(60));
             write(&records(&[ENTER]))
-        };
+        });
         unsafe { CloseHandle(input) };
-        match (typed, mode == "text", entered) {
-            (false, _, _) => bail!("couldn't type into the agent's console"),
-            (true, true, false) => Err(crate::deliver::Uncertain("the text went in but Enter didn't".into()).into()),
-            _ => Ok(()),
-        }
+        outcome(typed, if mode == "text" { Some(entered.unwrap_or(Written::Nothing)) } else { None })
     })();
     unsafe { FreeConsole() };
     result
@@ -195,7 +240,30 @@ mod tests {
         let codex = |pid| pid == 6;
         assert!(others_on_console(&[9, 5, 6, 4], 9, 5, &[4, 2], codex).is_empty());
         assert_eq!(others_on_console(&[9, 5, 6, 7], 9, 5, &[4], codex), vec![7]);
-        assert_eq!(native_program(crate::model::Kind::Codex), "codex");
-        assert_eq!(native_program(crate::model::Kind::Claude), "");
+        assert!(native_programs("codex").contains(&"codex-x86_64-pc-windows-msvc.exe"));
+        assert!(!native_programs("codex").contains(&"codex-tool.exe"), "exact names only");
+        assert!(native_programs("").is_empty());
+    }
+
+    fn uncertain(result: Result<()>) -> bool {
+        result.is_err_and(|e| e.downcast_ref::<crate::deliver::Uncertain>().is_some())
+    }
+
+    #[test]
+    fn anything_that_may_have_typed_is_uncertain_never_a_plain_failure() {
+        assert!(outcome(Written::All, Some(Written::All)).is_ok());
+        assert!(outcome(Written::All, None).is_ok(), "a single key");
+        let nothing = outcome(Written::Nothing, None);
+        assert!(nothing.is_err() && !uncertain(nothing), "nothing typed: safe to retry");
+        assert!(uncertain(outcome(Written::Part, None)));
+        assert!(uncertain(outcome(Written::Part, Some(Written::All))));
+        assert!(uncertain(outcome(Written::All, Some(Written::Nothing))), "text in, no Enter");
+        assert!(uncertain(outcome(Written::All, Some(Written::Part))));
+        // ...and that survives the helper's exit.
+        assert!(from_exit(Some(0), "").is_ok());
+        assert!(uncertain(from_exit(Some(UNCERTAIN_EXIT), "the text went in but Enter didn't")));
+        let failed = from_exit(Some(1), "the agent is no longer on its console");
+        assert!(failed.as_ref().is_err_and(|e| e.to_string() == "the agent is no longer on its console") && !uncertain(failed));
+        assert!(!uncertain(from_exit(None, "")));
     }
 }
