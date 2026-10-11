@@ -92,6 +92,8 @@ impl Lantern {
             UiAction::CheckUpdates => self.check_updates(),
             // The confirmation step is the Settings view's own state.
             UiAction::ConfirmUninstall => self.uninstall(),
+            UiAction::RemoveAppAnyway => self.remove_app(),
+            UiAction::DismissUninstall => self.dismiss_uninstall(),
             UiAction::ShowWelcome => self.show_welcome(),
             UiAction::FinishWelcome => self.finish_welcome(),
             UiAction::StartPointAsk => self.start_point_ask(),

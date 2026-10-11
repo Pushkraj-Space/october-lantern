@@ -5,7 +5,7 @@ use crate::settings::{Settings, data_dir, private_write};
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, RwLock};
@@ -295,23 +295,57 @@ pub fn notify(tx: Sender<Event>, agent: String, title: String, body: String) {
         }
     });
 }
-pub fn remove_integrations() -> Result<String> {
-    super::hooks("uninstall")?;
+/// The login item, launcher, icon and GNOME extension. Each failure says what's left.
+pub fn remove_integrations() -> Vec<String> {
+    let mut failures = Vec::new();
+    let data = crate::settings::xdg("XDG_DATA_HOME", ".local/share");
     for path in [
         crate::settings::autostart_path(),
-        crate::settings::xdg("XDG_DATA_HOME", ".local/share").join("applications/dev.october.lantern.desktop"),
-        crate::settings::xdg("XDG_DATA_HOME", ".local/share").join("icons/hicolor/256x256/apps/dev.october.lantern.png"),
+        data.join("applications/dev.october.lantern.desktop"),
+        data.join("icons/hicolor/256x256/apps/dev.october.lantern.png"),
     ] {
-        if path.exists() {
-            std::fs::remove_file(path)?;
+        if path.exists()
+            && let Err(error) = std::fs::remove_file(&path)
+        {
+            failures.push(format!("Removing {}: {error}. Delete it by hand.", path.display()));
         }
     }
     let _ = Command::new("gnome-extensions").args(["disable", "lantern@october.dev"]).output();
-    let extension = crate::settings::xdg("XDG_DATA_HOME", ".local/share").join("gnome-shell/extensions/lantern@october.dev");
-    if extension.exists() {
-        std::fs::remove_dir_all(extension)?;
+    let extension = data.join("gnome-shell/extensions/lantern@october.dev");
+    if extension.exists()
+        && let Err(error) = std::fs::remove_dir_all(&extension)
+    {
+        failures.push(format!("Removing the GNOME extension: {error}. Delete {} by hand.", extension.display()));
     }
-    Ok("Desktop integrations removed. Your projects, agent sessions, settings, and downloaded speech model are kept.".into())
+    failures
+}
+
+/// Moves Lantern's app folders to the Trash: the one running and the one it was installed in
+/// (they differ after an update, which runs from Lantern's data folder and went with it).
+/// Only installed bundles, never a build in the repo.
+pub fn remove_app(installed: Option<&Path>) -> std::result::Result<(), String> {
+    let data = data_dir();
+    let running = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let mut folders: Vec<PathBuf> =
+        [running, installed.map(Path::to_path_buf)].into_iter().flatten().filter(|dir| !dir.starts_with(&data) && dir.exists()).collect();
+    folders.dedup();
+    let mut problems = Vec::new();
+    for folder in folders {
+        if !super::installed_bundle(&folder) {
+            problems.push(format!("{} isn't an installed Lantern (a development build?), so it was left in place.", folder.display()));
+            continue;
+        }
+        match Command::new("gio").arg("trash").arg(&folder).output() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => problems.push(format!(
+                "Couldn't move {} to the Trash: {}. Delete it by hand.",
+                folder.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )),
+            Err(error) => problems.push(format!("Couldn't move {} to the Trash: {error}. Delete it by hand.", folder.display())),
+        }
+    }
+    if problems.is_empty() { Ok(()) } else { Err(problems.join("\n\n")) }
 }
 struct LanternTray {
     tx: Sender<Event>,

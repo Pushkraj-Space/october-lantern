@@ -13,6 +13,9 @@ impl Lantern {
         // Screenshots older than a week go; whether Lantern opens at login is read from the system.
         std::thread::spawn(crate::os::prune_screenshots);
         self.model.prefs.open_at_login = crate::settings::autostart_enabled();
+        if cfg!(target_os = "linux") {
+            self.note_install_folder();
+        }
         let snapshot = Arc::new(RwLock::new("[]".to_string()));
         crate::os::tray(self.tx.clone());
         crate::os::bridge(self.tx.clone(), snapshot.clone());

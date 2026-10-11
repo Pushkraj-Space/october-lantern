@@ -199,13 +199,6 @@ impl Lantern {
             self.show("Open your desktop's notification settings to allow Lantern's notifications.");
         }
     }
-
-    /// Removes Lantern's desktop integrations (launcher, login item, GNOME extension, agent
-    /// hooks) and signs out; projects, running agents and settings are kept.
-    pub(super) fn uninstall(&mut self) {
-        self.sign_out();
-        crate::os::task(self.tx.clone(), crate::os::remove_integrations, |result| Event::Status(result.unwrap_or_else(|error| error)));
-    }
 }
 
 /// `lantern-engine hooks status` → per agent state.

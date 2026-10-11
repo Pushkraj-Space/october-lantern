@@ -240,6 +240,10 @@ pub enum UiAction {
     FinishWelcome,
     RequestUninstall,
     ConfirmUninstall,
+    /// After partial cleanup, deliberately remove the app despite the listed failures.
+    RemoveAppAnyway,
+    /// Keep the app after partial cleanup, or dismiss an app-removal error.
+    DismissUninstall,
     Copy(String),
     OpenUrl(String),
     Quit,

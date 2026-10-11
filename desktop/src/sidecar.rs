@@ -192,6 +192,12 @@ impl Sidecar {
     pub fn send(&mut self, request: &Value) -> Result<()> {
         self.input.send(request)
     }
+    /// Stops the engine now (uninstalling: it holds files in Lantern's data folder open). Sessions
+    /// Lantern started run in processes of their own and keep running.
+    pub fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
     pub fn pid(&self) -> u32 {
         self.child.id()
     }

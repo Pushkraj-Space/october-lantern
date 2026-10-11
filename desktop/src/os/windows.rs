@@ -200,14 +200,73 @@ pub fn folder() -> Result<PathBuf> {
     rfd::FileDialog::new().set_title("Choose a project folder").pick_folder().context("no folder selected")
 }
 
-pub fn remove_integrations() -> Result<String> {
-    super::hooks("uninstall")?;
-    autostart_executable(false, Path::new(""))?;
-    let shortcut = crate::updates::start_menu_shortcut();
-    if shortcut.exists() {
-        std::fs::remove_file(shortcut)?;
+/// The login item and the Start menu shortcut. Each failure says what's left.
+pub fn remove_integrations() -> Vec<String> {
+    let mut failures = Vec::new();
+    if let Err(error) = autostart_executable(false, Path::new("")) {
+        failures.push(format!("Removing the login item: {error:#}. Turn October Lantern off in Settings › Apps › Startup."));
     }
-    Ok("Desktop integrations removed. Your projects, agent sessions, settings and speech model are kept.".into())
+    let shortcut = crate::updates::start_menu_shortcut();
+    if shortcut.exists()
+        && let Err(error) = std::fs::remove_file(&shortcut)
+    {
+        failures.push(format!("Removing the Start menu shortcut: {error}. Delete {} by hand.", shortcut.display()));
+    }
+    failures
+}
+
+/// The installer's entry in Apps (windows/installer.iss `AppId`, per user).
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{6C4C8A0E-5D0B-4F57-9D34-0C2A6F6E7B11}_is1";
+
+fn registry_string(key: &str, value: &str) -> Option<String> {
+    let (key, value) = (wide(key), wide(value));
+    let mut size = 0u32;
+    let status = unsafe {
+        RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), std::ptr::null_mut(), &mut size)
+    };
+    if status != ERROR_SUCCESS || size < 2 {
+        return None;
+    }
+    let mut buffer = vec![0u16; size as usize / 2];
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    (status == ERROR_SUCCESS).then(|| String::from_utf16_lossy(&buffer).trim_end_matches('\0').to_string())
+}
+
+/// Removes the app through its installer's own uninstaller, which runs once Lantern has quit. Only
+/// for the installed copy (or an update of it, in Lantern's data folder), never a build elsewhere.
+pub fn remove_app(_installed: Option<&Path>) -> std::result::Result<(), String> {
+    let folder = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)).unwrap_or_default();
+    let (Some(location), Some(uninstaller)) =
+        (registry_string(UNINSTALL_KEY, "InstallLocation"), registry_string(UNINSTALL_KEY, "UninstallString"))
+    else {
+        return Err(format!(
+            "This copy of Lantern wasn't installed with its installer, so its folder ({}) was left in place. Delete it after Lantern quits.",
+            folder.display()
+        ));
+    };
+    let normal = |path: &Path| path.to_string_lossy().trim_end_matches('\\').to_lowercase();
+    let installed = normal(&folder) == normal(Path::new(&location)) || folder.starts_with(crate::settings::data_dir().join("releases"));
+    if !installed {
+        return Err(format!(
+            "This copy of Lantern ({}) isn't the installed one, so the installed app was left in place.",
+            folder.display()
+        ));
+    }
+    super::command(uninstaller.trim().trim_matches('"'))
+        .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
+        .spawn()
+        .map(drop)
+        .map_err(|error| format!("Couldn't start the uninstaller: {error}. Remove October Lantern in Settings › Apps."))
 }
 
 pub fn process_alive(pid: u32) -> bool {

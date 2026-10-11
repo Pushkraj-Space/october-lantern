@@ -556,6 +556,22 @@ pub struct SystemState {
     pub update: Option<UpdateInfo>,
     pub checking_updates: bool,
     pub version: String,
+    pub uninstall: Uninstall,
+}
+
+/// Uninstalling Lantern (Settings › About, after the person confirmed it; Swift `Support.uninstall`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Uninstall {
+    #[default]
+    Idle,
+    /// Signing out and removing hooks, support files, settings and desktop integrations.
+    Removing,
+    /// Some of that couldn't be removed; each entry says what, and how to remove it by hand. The
+    /// app is still in place: the person chooses to remove it anyway or keep it.
+    Partial { failures: Vec<String> },
+    /// The app itself couldn't be removed (or this copy isn't an installed one).
+    AppFailed { message: String },
 }
 
 /// Persisted preferences (Swift `Preferences` + window placement).
@@ -588,6 +604,9 @@ pub struct Prefs {
     pub recent_folders: Vec<String>,
     /// Agent kinds, most recently used first.
     pub recent_kinds: Vec<String>,
+    /// Where Lantern was installed (the folder its app came from), so uninstalling can remove it
+    /// even when an update now runs from Lantern's data folder. Linux only; Windows asks its installer.
+    pub bundle: Option<String>,
 }
 
 impl Default for Prefs {
@@ -614,6 +633,7 @@ impl Default for Prefs {
             task_folder_by_app: HashMap::new(),
             recent_folders: Vec::new(),
             recent_kinds: Vec::new(),
+            bundle: None,
         }
     }
 }

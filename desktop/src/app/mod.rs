@@ -31,6 +31,7 @@ mod preferences;
 mod select;
 mod session;
 mod shots;
+mod uninstall;
 mod windows;
 
 use crate::model::{Inputs, Model, Prefs, drafts::Ticket, inbox::Turns};
@@ -84,6 +85,8 @@ pub struct Lantern {
     pointing: point_ask::Pointing,
     upkeep: preferences::Upkeep,
     dictating: dictation::Dictating,
+    /// Where Lantern was installed, read when uninstalling starts (the preferences go with it).
+    installed: Option<std::path::PathBuf>,
     /// The October account, once signed in (its access token asks October's AI).
     session: Option<crate::account::Session>,
     /// Sign-in attempts: a newer one (or signing out) makes older results stale.
@@ -128,6 +131,7 @@ impl Lantern {
             asking: assistant::Asking::default(),
             pointing: point_ask::Pointing::default(),
             upkeep: preferences::Upkeep::default(),
+            installed: None,
             dictating: dictation::Dictating::default(),
             session: None,
             auth: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
@@ -141,7 +145,8 @@ impl Lantern {
 
     /// Saves preferences and Waiting's seen/dismissed turns (never from tests).
     fn save_prefs(&self) {
-        if cfg!(test) {
+        // Never from tests, and never once uninstalling has begun (the settings are being removed).
+        if cfg!(test) || self.model.system.uninstall != crate::model::Uninstall::Idle {
             return;
         }
         let state = serde_json::json!({"prefs": self.model.prefs, "turns": self.turns});
@@ -178,6 +183,7 @@ impl Lantern {
             Event::Shortcuts(available) => self.model.caps.global_hotkeys = available,
             Event::Tray(available) => self.model.caps.tray = available,
             Event::Hooks(result) => self.hooks_result(result),
+            Event::Uninstalled(failures) => self.uninstalled(failures),
             Event::NotificationsAllowed(allowed) => self.model.system.notifications_allowed = allowed,
             Event::Transcript { owner, generation, result } => self.transcript(&owner, generation, result),
             Event::Update(result) => self.update_result(result),

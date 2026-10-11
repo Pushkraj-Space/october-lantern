@@ -1,6 +1,7 @@
 //! Desktop integrations run outside the render loop. What every system shares lives here; the
 //! tray, notifications, shortcuts, single-instance bridge, pickers and keyring are per system.
 use anyhow::Result;
+use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
@@ -67,6 +68,8 @@ pub enum Event {
     },
     /// `lantern-engine hooks status` (JSON), after reading or changing the agent hooks.
     Hooks(Result<String, String>),
+    /// Uninstalling removed everything but the app, except these (what's left, and how).
+    Uninstalled(Vec<String>),
     /// Whether the desktop lets Lantern's notifications through (`None`: can't tell).
     NotificationsAllowed(Option<bool>),
     /// Point & Ask's message for an agent is ready (its screenshot saved), or couldn't be.
@@ -203,9 +206,74 @@ pub fn hooks(action: &'static str) -> Result<String> {
     anyhow::ensure!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
+/// An installed Lantern: its app and engine side by side, and not a build inside this repo
+/// (a `target` folder, or a checkout with `desktop/Cargo.toml`). Uninstalling only ever moves such
+/// a folder to the Trash.
+pub fn installed_bundle(dir: &Path) -> bool {
+    let has = |name: &str| dir.join(if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }).is_file();
+    has("october-lantern")
+        && has("lantern-engine")
+        && !dir
+            .ancestors()
+            .any(|folder| folder.file_name().is_some_and(|name| name == "target") || folder.join("desktop/Cargo.toml").is_file())
+}
+
+/// Uninstalling, except for the app itself (Swift `Support.uninstall`): the hooks, restoring the
+/// agents' own settings, and Lantern's data folder (the engine's `hooks remove-all`), the desktop
+/// integrations, and the settings. Best effort; each failure says what's left and how to remove it.
+pub fn uninstall_parts() -> Vec<String> {
+    let mut failures = Vec::new();
+    if let Err(error) = hooks("remove-all") {
+        let home = crate::settings::home();
+        failures.push(format!(
+            "Removing the hooks: {error:#}. Remove the Lantern entries from {} (\"hooks\") and {} (\"notify\") by hand; backups ending in .lantern-backup-… are next to each file. Then delete {}.",
+            home.join(".claude").join("settings.json").display(),
+            home.join(".codex").join("config.toml").display(),
+            crate::settings::data_dir().display()
+        ));
+    }
+    failures.extend(remove_integrations());
+    let config = crate::settings::config_dir();
+    if config.exists()
+        && let Err(error) = std::fs::remove_dir_all(&config)
+    {
+        failures.push(format!("Removing Lantern's settings: {error}. Delete {} by hand.", config.display()));
+    }
+    failures
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_an_installed_bundle_counts_never_a_build_in_the_repo() {
+        let root = std::env::temp_dir().join(format!("lantern-bundle-{}", uuid::Uuid::new_v4().simple()));
+        let exe = |name: &str| if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+        let make = |dir: &Path, both: bool| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join(exe("october-lantern")), b"").unwrap();
+            if both {
+                std::fs::write(dir.join(exe("lantern-engine")), b"").unwrap();
+            }
+        };
+        let installed = root.join("Downloads").join("October-Lantern");
+        make(&installed, true);
+        assert!(installed_bundle(&installed));
+        let half = root.join("half");
+        make(&half, false);
+        assert!(!installed_bundle(&half), "no engine beside it");
+        let cargo = root.join("work").join("target").join("release");
+        make(&cargo, true);
+        assert!(!installed_bundle(&cargo), "a cargo build");
+        let checkout = root.join("lantern");
+        std::fs::create_dir_all(checkout.join("desktop")).unwrap();
+        std::fs::write(checkout.join("desktop").join("Cargo.toml"), b"").unwrap();
+        let packaged = checkout.join("build").join("linux");
+        make(&packaged, true);
+        assert!(!installed_bundle(&packaged), "a package built inside the repo");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn every_offered_shortcut_parses_and_none_unbinds() {
         for keys in crate::model::MESSAGE_HOTKEYS.iter().chain(&crate::model::POINT_ASK_HOTKEYS) {

@@ -96,6 +96,10 @@ impl Windows {
     pub fn quit(&mut self) {
         self.quitting = true;
     }
+    #[cfg(test)]
+    pub fn quitting(&self) -> bool {
+        self.quitting
+    }
     /// Runs `start` once Lantern's windows have drawn nothing for a couple of frames, so the capture
     /// leaves them out (the Mac excludes its own windows; portals and GDI can't). The windows stay
     /// mapped (unmapping would reset their window-manager state) and draw again on `capture_done`.
