@@ -1,5 +1,5 @@
 //! Text the person is typing that the domain also writes (CONTRACT §4): reply drafts (dictation
-//! appends, acknowledgements clear a revision, readdress moves them), the Ask Lantern box
+//! appends, acknowledgements clear a revision), the Ask Lantern box
 //! (suggestions fill it, submit clears it), the Point & Ask box, and the New Session form (assistant
 //! prefill, task defaults and the last model per agent fill it). Text only the UI touches (email,
 //! password, model search) lives in `ui::UiState` instead.

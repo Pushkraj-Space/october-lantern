@@ -127,10 +127,6 @@ fn styled_button(ui: &mut Ui, title: &str, amber: bool) -> Response {
 
 /// Glass paint only: a dark tint plus source rim/sheen. Native live backdrop material is the
 /// shell's responsibility. Insert at a reserved paint slot behind content once its height is known.
-pub fn glass_surface(ui: &mut Ui, rect: Rect, radius: f32, tint: f32) {
-    paint_glass(ui.painter(), rect, radius, tint);
-}
-
 pub fn paint_glass(painter: &Painter, rect: Rect, radius: f32, tint: f32) {
     painter.add(glass_shape(rect, radius, tint));
 }
@@ -264,22 +260,14 @@ impl Default for MarkdownStyle {
     }
 }
 
-/// Inline-only, preserving whitespace like Swift's AttributedString. Full chat block rendering
-/// uses `blocks` below instead of feeding arbitrary agent HTML to a renderer.
-pub fn markdown(ui: &mut Ui, source: &str, style: MarkdownStyle) -> Response {
-    markdown_spaced(ui, source, style, 0.0)
-}
-
-pub fn markdown_spaced(ui: &mut Ui, source: &str, style: MarkdownStyle, line_spacing: f32) -> Response {
-    markdown_linked(ui, source, style, line_spacing).0
-}
-
-/// Same layout as `markdown_spaced`; a safe link click is returned for UiAction::OpenUrl.
+/// Inline-only, preserving whitespace like Swift's AttributedString. A safe link click is
+/// returned for UiAction::OpenUrl; full chat block rendering uses `blocks_linked` below.
 pub fn markdown_linked(ui: &mut Ui, source: &str, style: MarkdownStyle, line_spacing: f32) -> (Response, Option<String>) {
     super::markdown::render(ui, source, style, line_spacing)
 }
 
-pub fn inline_job(source: &str, style: MarkdownStyle) -> egui::text::LayoutJob {
+#[cfg(test)]
+fn inline_job(source: &str, style: MarkdownStyle) -> egui::text::LayoutJob {
     super::markdown::inline_job(source, style)
 }
 
@@ -340,17 +328,13 @@ pub fn parse_blocks(source: &str) -> Vec<Block> {
     out
 }
 
-/// Full conversation Markdown, returning the code to copy (the caller emits UiAction::Copy).
-pub fn blocks(ui: &mut Ui, source: &str, id: Id) -> Option<String> {
-    blocks_linked(ui, source, id).copy
-}
-
 #[derive(Default)]
 pub struct BlockActions {
     pub copy: Option<String>,
     pub link: Option<String>,
 }
 
+/// Full conversation Markdown, returning code/link intents rather than running side effects.
 pub fn blocks_linked(ui: &mut Ui, source: &str, id: Id) -> BlockActions {
     let mut actions = BlockActions::default();
     ui.vertical(|ui| {
@@ -473,7 +457,7 @@ mod tests {
                         Settings,
                         Leaf,
                         Info,
-                        Account,
+                        AccountCircle,
                         Mail,
                         Play,
                         Exclamation,
@@ -481,7 +465,7 @@ mod tests {
                         icon_button(ui, icon, icon, 32.0, theme::MUTED, false);
                     }
                 });
-                markdown(ui, "**Hello**\n`let x = 1;`", MarkdownStyle::default());
+                let _ = markdown_linked(ui, "**Hello**\n`let x = 1;`", MarkdownStyle::default(), 0.0);
             },
         );
         assert!(!output.textures_delta.set.is_empty());

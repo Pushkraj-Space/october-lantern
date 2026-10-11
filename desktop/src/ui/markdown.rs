@@ -119,7 +119,8 @@ fn parse(source: &str, style: MarkdownStyle) -> Inline {
     result
 }
 
-pub fn inline_job(source: &str, style: MarkdownStyle) -> egui::text::LayoutJob {
+#[cfg(test)]
+pub(super) fn inline_job(source: &str, style: MarkdownStyle) -> egui::text::LayoutJob {
     parse(source, style).job
 }
 

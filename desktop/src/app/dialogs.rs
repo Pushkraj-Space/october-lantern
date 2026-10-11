@@ -87,12 +87,7 @@ impl Lantern {
             .with_resizable(false)
             .with_minimize_button(false)
             .with_maximize_button(false);
-        let env = Env {
-            now_ms: Self::now_ms(),
-            pixels_per_point: ctx.pixels_per_point(),
-            reduce_motion: false,
-            home: crate::settings::home().to_string_lossy().into_owned(),
-        };
+        let env = Env { now_ms: Self::now_ms(), reduce_motion: false, home: crate::settings::home().to_string_lossy().into_owned() };
         let (model, inputs, view, out) = (&self.model, &mut self.inputs, &mut self.view, &mut self.actions);
         let assets = self.assets.as_ref().expect("assets load before the first frame");
         let mut open = true;

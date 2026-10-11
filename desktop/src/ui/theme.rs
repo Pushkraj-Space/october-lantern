@@ -21,7 +21,6 @@ pub const HAIRLINE: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
 pub const STROKE: Color32 = Color32::from_rgba_premultiplied(36, 36, 36, 36);
 pub const PANEL_WIDTH: f32 = 380.0;
 pub const POINT_WIDTH: f32 = 400.0;
-pub const PILL_WIDTH: f32 = 50.0;
 pub const PANEL_RADIUS: u8 = 22;
 pub const POINT_RADIUS: u8 = 20;
 

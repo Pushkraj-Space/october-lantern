@@ -77,12 +77,7 @@ impl eframe::App for Render {
         let ctx = ui.ctx().clone();
         let assets = self.assets.get_or_insert_with(|| Assets::load(&ctx));
         let max_height = self.fixture.max_height.unwrap_or(1032.0);
-        let env = Env {
-            now_ms: self.fixture.now_ms,
-            pixels_per_point: ctx.pixels_per_point(),
-            reduce_motion: self.fixture.reduce_motion,
-            home: self.fixture.home.clone(),
-        };
+        let env = Env { now_ms: self.fixture.now_ms, reduce_motion: self.fixture.reduce_motion, home: self.fixture.home.clone() };
         let mut actions = Vec::new();
         let mut cx = Ctx {
             model: &self.fixture.model,

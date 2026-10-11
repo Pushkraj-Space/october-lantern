@@ -595,7 +595,6 @@ pub struct Prefs {
     pub message_hotkey: String,
     pub point_ask_hotkey: String,
     pub automatic_updates: bool,
-    pub share_usage: bool,
     pub welcomed: bool,
     /// Last model chosen per agent kind.
     pub model_by_kind: HashMap<String, String>,
@@ -627,7 +626,6 @@ impl Default for Prefs {
             message_hotkey: "ctrl+alt+space".into(),
             point_ask_hotkey: "ctrl+alt+p".into(),
             automatic_updates: true,
-            share_usage: false,
             welcomed: false,
             model_by_kind: HashMap::new(),
             task_folder_by_app: HashMap::new(),

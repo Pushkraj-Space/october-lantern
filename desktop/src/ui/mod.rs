@@ -1,8 +1,6 @@
 //! The Mac app's surfaces, drawn with egui (CONTRACT §4–5). Views read `&Model`, edit `Inputs`
 //! text in place, keep view-only state in `UiState`, and report what the person did as
 //! `UiAction`s; `app::Lantern::apply` turns those into effects.
-// The new UI path is built while the legacy UI is still the default (CONTRACT §10).
-#![allow(dead_code)]
 
 pub mod assets;
 mod assistant;
@@ -31,7 +29,6 @@ pub use assets::Assets;
 pub struct Env {
     /// Milliseconds since the epoch; fixed in fixtures.
     pub now_ms: f64,
-    pub pixels_per_point: f32,
     pub reduce_motion: bool,
     /// The home folder, for `~` paths and "Home folder".
     pub home: String,
@@ -140,7 +137,6 @@ pub enum SettingChange {
     NotificationsEnabled(bool),
     NotifyOnFinish(bool),
     AgentMuted { kind: AgentKind, muted: bool },
-    ShareUsage(bool),
 }
 
 /// Everything a person can do (CONTRACT §4; Atlas owns this enum, payloads frozen with the skeleton).
@@ -156,9 +152,6 @@ pub enum UiAction {
     /// `None`: Ask Lantern, focused. `Some`: that agent's chat, composer focused.
     Compose {
         agent_id: Option<AgentId>,
-    },
-    Readdress {
-        agent_id: AgentId,
     },
     SendReply {
         agent_id: AgentId,
@@ -198,7 +191,6 @@ pub enum UiAction {
         kind: AgentKind,
     },
     RequestCapturePermission,
-    RequestAppContextPermission,
     /// Boxed: much larger than every other action.
     Launch(Box<SessionRequest>),
     CloseLaunchPreview,
@@ -242,7 +234,6 @@ pub enum UiAction {
     ReportProblem,
     ShowWelcome,
     FinishWelcome,
-    RequestUninstall,
     ConfirmUninstall,
     /// After partial cleanup, deliberately remove the app despite the listed failures.
     RemoveAppAnyway,
@@ -336,20 +327,6 @@ pub fn render_welcome(ui: &mut egui::Ui, cx: &mut Ctx) -> f32 {
 /// Settings, 520 x 480.
 pub fn render_settings(ui: &mut egui::Ui, cx: &mut Ctx) -> f32 {
     settings::render(ui, cx)
-}
-
-fn placeholder(ui: &mut egui::Ui, cx: &mut Ctx, max_height: f32, title: &str) -> f32 {
-    let top = ui.cursor().top();
-    ui.vertical(|ui| {
-        ui.add_space(14.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            ui.label(egui::RichText::new(title).strong());
-            ui.label(format!("· {:?} · {} agents · {} new", cx.model.panel, cx.model.agents.len(), cx.model.badge()));
-        });
-        ui.add_space(14.0);
-    });
-    (ui.cursor().top() - top).min(max_height)
 }
 
 #[cfg(test)]

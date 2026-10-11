@@ -19,7 +19,6 @@ impl Lantern {
                 }
                 self.model.compose_focus += 1;
             }
-            UiAction::Readdress { agent_id } => self.inputs.drafts.readdress(&agent_id),
             UiAction::SendReply { agent_id } => self.send_reply(&agent_id),
             UiAction::OpenAgent { agent_id } => {
                 crate::os::allow_focus(self.engine.pid());
@@ -136,9 +135,6 @@ impl Lantern {
             }
             UiAction::Copy(text) => self.windows.copy(text),
             UiAction::Quit => self.windows.quit(),
-            // TODO(apollo): the remaining actions land with their surfaces (new session, assistant,
-            // point & ask, account, settings).
-            other => log::debug(&other),
         }
     }
 
@@ -220,15 +216,6 @@ impl Lantern {
     fn open_url(&mut self, url: &str) {
         if let Err(error) = crate::os::open(url) {
             self.show(format!("Couldn't open {url}: {error:#}"));
-        }
-    }
-}
-
-mod log {
-    /// Actions whose effects haven't landed yet; visible with LANTERN_DEBUG=1.
-    pub fn debug(action: &crate::ui::UiAction) {
-        if std::env::var_os("LANTERN_DEBUG").is_some() {
-            eprintln!("lantern: not handled yet: {action:?}");
         }
     }
 }

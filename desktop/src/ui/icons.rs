@@ -44,7 +44,6 @@ pub enum Icon {
     Settings,
     Leaf,
     Info,
-    Account,
     AccountCircle,
     Mail,
     Play,
@@ -333,10 +332,6 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.circle(12.0, 6.5, 1.0, true);
             p.line(&[(10.0, 11.0), (12.0, 11.0), (12.0, 18.0)]);
             p.line(&[(9.0, 18.0), (15.0, 18.0)]);
-        }
-        Account => {
-            p.circle(12.0, 7.0, 4.0, false);
-            p.arc((12.0, 22.0), 8.0, std::f32::consts::PI, std::f32::consts::TAU);
         }
         AccountCircle => {
             p.circle(12.0, 12.0, 10.0, false);

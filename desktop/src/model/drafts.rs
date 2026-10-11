@@ -3,13 +3,12 @@
 //! acknowledgement clears exactly the text that was sent to that agent, never another agent's draft
 //! or a later retype of the same words.
 //!
-//! The UI changes text only through [`Drafts::edit_text`]. Recipient changes (`address`, `readdress`)
-//! and acknowledgements are domain transitions made by `app::Lantern::apply`.
+//! The UI changes text only through [`Drafts::edit_text`]. Recipient changes (`address`) and
+//! acknowledgements are domain transitions made by `app::Lantern::apply`.
 //!
 //! Invariant: an acknowledgement never clears a newer edit. Every text write (typing, `edit_text`,
-//! dictation `append`, programmatic `set`) goes through `set`, which gives a new revision; `readdress`
-//! moves a draft to another recipient key, so a ticket for the old recipient no longer matches it.
-//! `sent` clears only when both the recipient and the revision still match the ticket.
+//! dictation `append`, programmatic `set`) goes through `set`, which gives a new revision. `sent`
+//! clears only when both the recipient and the revision still match the ticket.
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -108,22 +107,6 @@ impl Drafts {
     /// Switches conversation (opening a chat, a card, a notification). Drafts stay with their agents.
     pub fn address(&mut self, recipient: Option<&str>) {
         self.recipient = recipient.map(str::to_string);
-    }
-
-    /// Changes the recipient of the draft being written: an explicit choice. The text moves only
-    /// when the new recipient has no draft of its own.
-    pub fn readdress(&mut self, recipient: &str) {
-        if self.recipient.as_deref() == Some(recipient) {
-            return;
-        }
-        let key = self.key().to_string();
-        if self.drafts.contains_key(&key)
-            && !self.drafts.contains_key(recipient)
-            && let Some(moving) = self.drafts.remove(&key)
-        {
-            self.drafts.insert(recipient.to_string(), moving);
-        }
-        self.recipient = Some(recipient.to_string());
     }
 
     /// The current draft, ready to send; `None` with nothing to send or no recipient.
@@ -225,22 +208,6 @@ mod tests {
     }
 
     #[test]
-    fn readdress_moves_text_only_to_an_empty_draft() {
-        let mut d = Drafts::default();
-        d.address(Some("A"));
-        typed(&mut d, "for someone");
-        d.readdress("B");
-        assert_eq!(d.text_for("B"), "for someone");
-        assert_eq!(d.text_for("A"), "");
-        d.address(Some("C"));
-        typed(&mut d, "C's own");
-        d.address(Some("B"));
-        d.readdress("C");
-        assert_eq!(d.text(), "C's own");
-        assert_eq!(d.text_for("B"), "for someone");
-    }
-
-    #[test]
     fn prune_keeps_the_addressed_draft() {
         let mut d = Drafts::default();
         d.address(Some("gone"));
@@ -278,17 +245,6 @@ mod tests {
         d.append("and the logs", "A");
         d.sent(&sent);
         assert_eq!(d.text_for("A"), "check this and the logs");
-    }
-
-    #[test]
-    fn an_ack_never_clears_a_draft_that_moved_to_another_recipient() {
-        let mut d = Drafts::default();
-        d.address(Some("A"));
-        typed(&mut d, "deploy it");
-        let sent = d.ticket().unwrap();
-        d.readdress("B");
-        d.sent(&sent);
-        assert_eq!(d.text_for("B"), "deploy it");
     }
 
     #[test]

@@ -60,7 +60,6 @@ impl Lantern {
                 }
                 self.model.inbox = self.turns.inbox(&self.model.agents, &self.model.prefs);
             }
-            SettingChange::ShareUsage(on) => prefs.share_usage = on,
         }
         self.save_prefs();
         self.publish_tray_menu();

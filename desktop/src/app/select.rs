@@ -152,12 +152,7 @@ impl Lantern {
             .with_always_on_top()
             .with_taskbar(false);
         let max_height = work.height() - 2.0 * MARGIN;
-        let env = Env {
-            now_ms: Self::now_ms(),
-            pixels_per_point: ctx.pixels_per_point(),
-            reduce_motion: false,
-            home: crate::settings::home().to_string_lossy().into_owned(),
-        };
+        let env = Env { now_ms: Self::now_ms(), reduce_motion: false, home: crate::settings::home().to_string_lossy().into_owned() };
         let (model, inputs, view, out) = (&self.model, &mut self.inputs, &mut self.view, &mut self.actions);
         let assets = self.assets.as_ref().expect("assets load before the first frame");
         let mut measured = None;
