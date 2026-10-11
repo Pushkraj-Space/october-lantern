@@ -11,6 +11,8 @@ use eframe::egui::{self, Align, Color32, Layout, Rect, Sense, Stroke, Ui, vec2};
 const SIZE: egui::Vec2 = vec2(520.0, 480.0);
 const BACKGROUND: Color32 = Color32::from_gray(30);
 const GROUP: Color32 = Color32::from_gray(39);
+// SettingsView.swift's help predates area selection and signed-in Ask routing.
+const POINT_ASK_HELP: &str = "Hold the shortcut, select an area and say what you want. A card shows a screenshot of it; Enter asks October, or sends it to the agent.";
 
 pub fn render(ui: &mut Ui, cx: &mut Ctx) -> f32 {
     let rect = Rect::from_min_size(ui.cursor().min, SIZE);
@@ -137,7 +139,7 @@ fn setting_switch(ui: &mut Ui, title: &str, current: bool, agent: Option<(&super
     response.clicked().then_some(on)
 }
 
-fn picker(ui: &mut Ui, title: &str, current: &str, options: &[&str], label: impl Fn(&str) -> String) -> Option<String> {
+fn picker(ui: &mut Ui, title: &str, current: &str, options: &[&str], help: Option<&str>, label: impl Fn(&str) -> String) -> Option<String> {
     let mut selected = current.to_owned();
     ui.horizontal(|ui| {
         let label_width = ui.available_width() - 170.0 - ui.spacing().item_spacing.x;
@@ -147,7 +149,8 @@ fn picker(ui: &mut Ui, title: &str, current: &str, options: &[&str], label: impl
                 c::label(ui, title, 13.0, Weight::Regular, t::INK)
             })
             .inner;
-        egui::ComboBox::from_id_salt(title)
+        let label_response = if let Some(help) = help { label_response.on_hover_text(help) } else { label_response };
+        let response = egui::ComboBox::from_id_salt(title)
             .width(170.0)
             .selected_text(c::text(label(current), 12.0, Weight::Regular, t::INK))
             .show_ui(ui, |ui| {
@@ -157,6 +160,9 @@ fn picker(ui: &mut Ui, title: &str, current: &str, options: &[&str], label: impl
             })
             .response
             .labelled_by(label_response.id);
+        if let Some(help) = help {
+            response.on_hover_text(help);
+        }
     });
     (selected != current).then_some(selected)
 }
@@ -165,25 +171,24 @@ fn general(ui: &mut Ui, cx: &mut Ctx) {
     group(ui, None, |ui| {
         toggle(ui, cx, "Open at login", cx.model.prefs.open_at_login, SettingChange::OpenAtLogin);
         let edge = if cx.model.prefs.edge == Edge::Left { "left" } else { "right" };
-        if let Some(value) =
-            picker(
-                ui,
-                "Lantern position",
-                edge,
-                &["right", "left"],
-                |value| if value == "left" { "Left edge".into() } else { "Right edge".into() },
-            )
-        {
+        if let Some(value) = picker(ui, "Lantern position", edge, &["right", "left"], None, |value| {
+            if value == "left" { "Left edge".into() } else { "Right edge".into() }
+        }) {
             cx.emit(UiAction::ChangeSetting(SettingChange::Edge(if value == "left" { Edge::Left } else { Edge::Right })));
         }
         if let Some(value) =
-            picker(ui, "Shortcut to message an agent", &cx.model.prefs.message_hotkey, &MESSAGE_HOTKEYS, crate::model::hotkey_label)
+            picker(ui, "Shortcut to message an agent", &cx.model.prefs.message_hotkey, &MESSAGE_HOTKEYS, None, crate::model::hotkey_label)
         {
             cx.emit(UiAction::ChangeSetting(SettingChange::MessageHotkey(value)));
         }
-        if let Some(value) =
-            picker(ui, "Point & Ask (hold, point, speak)", &cx.model.prefs.point_ask_hotkey, &POINT_ASK_HOTKEYS, crate::model::hotkey_label)
-        {
+        if let Some(value) = picker(
+            ui,
+            "Point & Ask (hold, point, speak)",
+            &cx.model.prefs.point_ask_hotkey,
+            &POINT_ASK_HOTKEYS,
+            Some(POINT_ASK_HELP),
+            crate::model::hotkey_label,
+        ) {
             cx.emit(UiAction::ChangeSetting(SettingChange::PointAskHotkey(value)));
         }
         toggle(ui, cx, "Check for updates automatically", cx.model.prefs.automatic_updates, SettingChange::AutomaticUpdates);
@@ -685,6 +690,26 @@ mod tests {
         assert!(texts(&screen.frame(Vec::new()).1).iter().any(|(text, _)| text == "Uninstalling October Lantern…"));
         screen.model.system.uninstall = Uninstall::AppFailed { message: "Development builds are left in place.".into() };
         assert_eq!(screen.click("OK"), vec![UiAction::DismissUninstall]);
+    }
+
+    #[test]
+    fn point_ask_shortcut_help_describes_selection_and_both_enter_routes() {
+        for target in ["Point & Ask (hold, point, speak)", "Ctrl+Alt+P"] {
+            let mut screen = Screen::new(0);
+            screen.ctx.global_style_mut(|style| {
+                style.interaction.tooltip_delay = 0.0;
+                style.interaction.show_tooltips_only_when_still = false;
+            });
+            screen.frame(Vec::new());
+            let output = screen.frame(Vec::new()).1;
+            let pos = texts(&output).into_iter().find(|(text, _)| text == target).unwrap().1.center();
+            screen.frame(vec![egui::Event::PointerMoved(pos)]);
+            let (actions, output) = screen.frame(vec![egui::Event::PointerMoved(pos)]);
+            assert!(actions.is_empty(), "help must not change the shortcut or submit a question");
+            let help =
+                texts(&output).into_iter().find(|(text, _)| text == POINT_ASK_HELP).expect("hovering the label or picker shows help").1;
+            assert!(Rect::from_min_size(egui::Pos2::ZERO, SIZE).contains_rect(help), "help remains within the Settings window: {help:?}");
+        }
     }
 
     #[test]
