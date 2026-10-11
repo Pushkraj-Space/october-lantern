@@ -348,6 +348,8 @@ pub struct AppContext {
     pub selected_text: Option<String>,
     /// Pid of a foreground terminal (Point & Ask recipient guess).
     pub pid: Option<i64>,
+    /// The app's icon as a PNG Lantern saved (the "Work on <app>" row), when the app provides one.
+    pub icon: Option<PathBuf>,
 }
 
 impl AppContext {

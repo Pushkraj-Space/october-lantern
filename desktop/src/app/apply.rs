@@ -46,7 +46,8 @@ impl Lantern {
                 crate::os::task(self.tx.clone(), crate::os::folder, crate::os::Event::Folder);
             }
             UiAction::SetSessionScreenshot(on) => self.set_session_screenshot(on),
-            UiAction::RetakeSessionScreenshot => {
+            // Asking again shows the desktop's screen-capture permission (Linux portal).
+            UiAction::RequestCapturePermission | UiAction::RetakeSessionScreenshot => {
                 if self.inputs.new_session.screenshot {
                     self.capture_screen();
                 }

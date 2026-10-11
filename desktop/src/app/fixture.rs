@@ -137,13 +137,30 @@ pub fn run(fixture: &Path, out: PathBuf, scale: f32) -> Result<()> {
     let result = std::sync::Arc::new(std::sync::Mutex::new(None));
     let view = std::mem::take(&mut fixture.view);
     let app = Render { fixture, view, assets: None, out, frames: 0, height: 0.0, requested: false, result: result.clone() };
+    #[allow(unused_mut)]
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Lantern fixture")
+        .with_inner_size(size)
+        .with_position([0.0, 0.0])
+        .with_resizable(false)
+        .with_decorations(false)
+        .with_transparent(true)
+        .with_clamp_size_to_monitor_size(false);
+    // Wayland compositors (and window managers for normal windows) clamp a window to the screen,
+    // which would crop tall @2x surfaces. An X11 dock window may be taller than the screen.
+    #[cfg(target_os = "linux")]
+    {
+        viewport = viewport.with_window_type(egui::X11WindowType::Dock);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Lantern fixture")
-            .with_inner_size(size)
-            .with_resizable(false)
-            .with_decorations(false)
-            .with_transparent(true),
+        viewport,
+        #[cfg(target_os = "linux")]
+        event_loop_builder: crate::os::shell::x11_available().then(|| -> eframe::EventLoopBuilderHook {
+            Box::new(|builder| {
+                use winit::platform::x11::EventLoopBuilderExtX11;
+                builder.with_x11();
+            })
+        }),
         ..Default::default()
     };
     eframe::run_native(

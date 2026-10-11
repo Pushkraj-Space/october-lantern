@@ -48,7 +48,10 @@ impl Lantern {
         form.kind = kind.clone();
         form.model = kind.as_ref().and_then(|kind| prefs.model_by_kind.get(kind.as_str()).cloned());
         form.open_in_terminal = prefs.open_in_terminal || !self.model.new_session.in_lantern_available;
-        form.folder = task_app.as_ref().and_then(|app| prefs.task_folder_by_app.get(&app.id).cloned());
+        // No folder chosen yet: the form applies the Mac's precedence itself (a Task's document
+        // folder, then that app's last task folder, then Documents/Lantern Tasks/<app>, else the
+        // first offered folder), so a pre-filled folder must not override it.
+        form.folder = None;
         self.model.new_session.task_app = task_app;
         self.model.new_session.launch_error = None;
         if let Some(kind) = &kind {
@@ -435,6 +438,18 @@ mod tests {
         assert_eq!(prefs.model_by_kind.get("claude").map(String::as_str), Some("opus"));
         assert_eq!(prefs.task_folder_by_app.get("resolve").map(String::as_str), Some("/p"));
         assert_eq!(prefs.recent_kinds.first().map(String::as_str), Some("claude"));
+    }
+
+    #[test]
+    fn new_session_leaves_the_folder_to_the_forms_precedence() {
+        let mut lantern = lantern();
+        lantern.inputs.new_session.folder = Some("/old/choice".into());
+        lantern.start_new_session();
+        assert_eq!(lantern.model.panel, Some(PanelMode::NewSession));
+        assert_eq!(lantern.inputs.new_session.folder, None);
+        assert_eq!(lantern.inputs.new_session.kind.as_ref().map(AgentKind::as_str), Some("claude"));
+        lantern.start_new_session();
+        assert_eq!(lantern.model.panel, None, "+ again closes it");
     }
 
     #[test]

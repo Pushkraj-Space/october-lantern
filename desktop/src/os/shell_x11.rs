@@ -37,9 +37,13 @@ impl X {
         atom
     }
     fn cardinals(&mut self, window: Window, name: &'static str, kind: impl Into<u32>) -> Vec<u32> {
+        self.cardinals_up_to(window, name, kind, 4096)
+    }
+    /// Up to `max` 32-bit values (icons need far more than other properties).
+    fn cardinals_up_to(&mut self, window: Window, name: &'static str, kind: impl Into<u32>, max: u32) -> Vec<u32> {
         let atom = self.atom(name);
         self.conn
-            .get_property(false, window, atom, kind, 0, 4096)
+            .get_property(false, window, atom, kind, 0, max)
             .ok()
             .and_then(|c| c.reply().ok())
             .and_then(|reply| reply.value32().map(Iterator::collect))
@@ -157,18 +161,67 @@ pub fn foreground_app() -> Option<crate::model::AppContext> {
     let id = if instance.is_empty() { class.clone() } else { instance };
     let is_terminal = TERMINALS.iter().any(|terminal| terminal.eq_ignore_ascii_case(&id) || terminal.eq_ignore_ascii_case(&class));
     let title = x.title(window);
+    let icon = app_icon(&mut x, window, &id);
     Some(crate::model::AppContext {
         name: if class.is_empty() { id.clone() } else { class },
-        id,
         is_terminal,
         window: (!title.is_empty()).then_some(title),
         pid: x.cardinals(window, "_NET_WM_PID", AtomEnum::CARDINAL).first().map(|&pid| pid as i64),
+        icon,
+        id,
         ..Default::default()
     })
+}
+
+/// The window's `_NET_WM_ICON` closest to 64 px, saved as a PNG under Lantern's data folder.
+fn app_icon(x: &mut X, window: Window, id: &str) -> Option<std::path::PathBuf> {
+    let data = x.cardinals_up_to(window, "_NET_WM_ICON", AtomEnum::CARDINAL, 1 << 20);
+    let (width, height, pixels) = pick_icon(&data, 64)?;
+    let rgba: Vec<u8> = pixels.iter().flat_map(|&argb| [(argb >> 16) as u8, (argb >> 8) as u8, argb as u8, (argb >> 24) as u8]).collect();
+    let image = image::RgbaImage::from_raw(width, height, rgba)?;
+    let safe: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect();
+    let path = crate::settings::data_dir().join("icons").join(format!("{safe}.png"));
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    image.save(&path).ok()?;
+    Some(path)
+}
+
+/// `_NET_WM_ICON` is width, height, then width*height ARGB pixels, repeated per size. Picks the
+/// smallest at least `want` wide (else the largest).
+fn pick_icon(data: &[u32], want: u32) -> Option<(u32, u32, &[u32])> {
+    let mut icons = Vec::new();
+    let mut rest = data;
+    while rest.len() >= 2 {
+        let (width, height) = (rest[0], rest[1]);
+        let len = (width as usize).checked_mul(height as usize)?;
+        if width == 0 || height == 0 || rest.len() < 2 + len {
+            break;
+        }
+        icons.push((width, height, &rest[2..2 + len]));
+        rest = &rest[2 + len..];
+    }
+    icons.iter().filter(|icon| icon.0 >= want).min_by_key(|icon| icon.0).or_else(|| icons.iter().max_by_key(|icon| icon.0)).copied()
 }
 
 /// The global pointer isn't reliable under XWayland (stale over Wayland-native windows), so hover
 /// comes from Lantern's own windows (CONTRACT §8).
 pub fn cursor_position() -> Option<eframe::egui::Pos2> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_icon;
+
+    #[test]
+    fn picks_the_smallest_icon_at_least_the_wanted_size() {
+        let mut data = vec![2, 2, 0xff00_0000, 0, 0, 0];
+        data.extend([4, 4]);
+        data.extend([1u32; 16]);
+        data.extend([128, 1]);
+        data.extend([2u32; 128]);
+        assert_eq!(pick_icon(&data, 3).map(|(w, h, _)| (w, h)), Some((4, 4)));
+        assert_eq!(pick_icon(&data, 200).map(|(w, h, _)| (w, h)), Some((128, 1)), "else the largest");
+        assert_eq!(pick_icon(&[5, 5, 1], 64), None, "truncated data is ignored");
+    }
 }
