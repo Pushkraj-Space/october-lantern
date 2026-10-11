@@ -22,8 +22,10 @@ pub(crate) fn uptime() -> f64 {
 
 mod apply;
 mod assistant;
+mod dialogs;
 mod engine;
 pub mod fixture;
+mod menu;
 mod point_ask;
 mod select;
 mod session;
@@ -362,6 +364,7 @@ pub fn run(terminal: &str, start: Option<UiAction>) -> Result<()> {
             let mut lantern = Lantern::new(engine, Some(cc.egui_ctx.clone()));
             lantern.on_ready = start;
             lantern.restore_account();
+            lantern.first_launch();
             Ok(Box::new(lantern))
         }),
     )

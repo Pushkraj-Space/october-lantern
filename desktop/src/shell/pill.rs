@@ -23,6 +23,8 @@ pub struct PillInput {
     /// What's under the pointer: its help text, its rect in the pill, and the text's size. A 50pt
     /// window would clip an egui tooltip, so the shell shows it in a window of its own.
     pub help: Option<(String, Rect, Vec2)>,
+    /// Right-clicked on the lantern, at this point in the pill: show its menu.
+    pub menu_at: Option<Pos2>,
 }
 
 /// Help text style (the shell's tooltip window uses the same).
@@ -55,6 +57,7 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
         dragging: response.dragged(),
         drag_stopped: response.drag_stopped(),
         help: None,
+        menu_at: response.secondary_clicked().then(|| response.interact_pointer_pos()).flatten(),
     };
     if response.hovered() && !response.dragged() {
         input.help = Some((tooltip.clone(), lantern, measure(&tooltip)));

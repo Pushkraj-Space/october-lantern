@@ -78,6 +78,9 @@ impl Lantern {
             }
             UiAction::CancelSignIn => self.cancel_sign_in(),
             UiAction::SignOut => self.sign_out(),
+            UiAction::ShowSettings => self.windows.dialogs.settings = true,
+            UiAction::ShowWelcome => self.windows.dialogs.welcome = true,
+            UiAction::FinishWelcome => self.finish_welcome(),
             UiAction::StartPointAsk => self.start_point_ask(),
             UiAction::ReselectPointAsk => self.reselect_point_ask(),
             UiAction::CancelPointAsk => self.cancel_point_ask(),

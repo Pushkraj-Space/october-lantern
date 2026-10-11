@@ -56,6 +56,12 @@ pub struct Windows {
     tip: Option<(String, Rect, Vec2, f64)>,
     /// Point & Ask's overlay and card.
     pub select: super::select::State,
+    /// The lantern's right-click menu.
+    pub menu: super::menu::State,
+    /// Settings and Welcome.
+    pub dialogs: super::dialogs::State,
+    /// Expand the pill for a few seconds (after Welcome), on the next frame.
+    flash: bool,
 }
 
 impl Windows {
@@ -64,6 +70,9 @@ impl Windows {
             || self.snap.is_some()
             || self.panel_opened.is_some_and(|at| at.elapsed().as_secs_f32() < FADE)
             || self.hover.expanded
+    }
+    pub fn flash(&mut self) {
+        self.flash = true;
     }
     /// The pill's window, in points, once placed.
     pub fn pill_rect(&self) -> Option<Rect> {
@@ -170,6 +179,9 @@ impl Lantern {
             && platform::cursor_position()
                 .zip(outer)
                 .is_some_and(|(cursor, rect)| rect.expand(6.0).contains((cursor.to_vec2() / scale).to_pos2()));
+        if std::mem::take(&mut w.flash) {
+            w.hover.flash(now);
+        }
         if w.drag.is_none() {
             let was = w.hover.expanded;
             w.hover.update(inside_window || in_halo, now);
@@ -230,6 +242,10 @@ impl Lantern {
             .show(ui, |ui| shell::pill::show(ui, &self.model, assets, expanded, &mut self.actions))
             .inner;
         let w = &mut self.windows;
+        if let (Some(local), Some(at)) = (input.menu_at, w.pill_at) {
+            w.menu.open(at + local.to_vec2());
+            w.tip = None;
+        }
         w.tip = match (input.help, w.tip.take()) {
             (Some((text, rect, size)), Some((old, _, _, since))) if old == text => Some((text, rect, size, since)),
             (Some((text, rect, size)), _) => Some((text, rect, size, now)),
@@ -265,6 +281,8 @@ impl Lantern {
         self.tip(&ctx, size);
         self.panel(&ctx, work, scale);
         self.point_ask_windows(&ctx, scale, false);
+        self.menu(&ctx);
+        self.dialogs(&ctx);
     }
 
     /// The pill's help text, beside the pill, after half a second (a native tooltip on the Mac).
