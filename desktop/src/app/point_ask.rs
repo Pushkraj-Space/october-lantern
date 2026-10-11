@@ -234,7 +234,12 @@ impl Lantern {
     /// Hands the selection to the agent: the screenshot saved in its project (ignored by Git),
     /// your words, where it is, and October's answer if there was one.
     pub(super) fn send_point(&mut self) {
-        let Some(agent) = self.model.point_ask.recipient.as_deref().and_then(|id| self.model.agent(id)).cloned() else { return };
+        let Some(pinned) = self.model.point_ask.recipient.clone() else { return };
+        // The pinned agent stays pinned when it exits (CONTRACT §9.4): say so, never retarget.
+        let Some(agent) = self.model.agent(&pinned).cloned() else {
+            self.model.point_ask.problem = Some("That agent has exited. Choose another.".into());
+            return;
+        };
         if !self.can_send_selection() {
             return;
         }
@@ -460,6 +465,20 @@ mod tests {
         lantern.point_ask_selected(None);
         assert_eq!(lantern.model.point_ask.phase, PointAskPhase::Card);
         assert_eq!(lantern.model.compose_focus, before + 2, "back on the card after Esc while reselecting");
+    }
+
+    #[test]
+    fn sending_to_an_agent_that_exited_says_so_and_keeps_it_pinned() {
+        let mut lantern = lantern();
+        lantern.begin_point_ask();
+        lantern.model.point_ask.phase = PointAskPhase::Card;
+        lantern.model.point_ask.recipient = Some("gone".into());
+        lantern.inputs.point_ask = "Fix this".into();
+        lantern.send_point();
+        assert_eq!(lantern.model.point_ask.problem.as_deref(), Some("That agent has exited. Choose another."));
+        assert_eq!(lantern.model.point_ask.recipient.as_deref(), Some("gone"));
+        assert_eq!(lantern.inputs.point_ask, "Fix this");
+        assert!(!lantern.model.point_ask.sending);
     }
 
     #[test]
