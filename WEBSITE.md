@@ -21,7 +21,7 @@ What the website needs for the beta. Product facts come from [product guide](doc
 ## Should add
 
 - **Which agents and terminals work**, from the product guide tables "Supported agents" and "Supported terminals". Be exact:
-  - Full support: Claude Code, Codex, OpenCode, Pi, October harness and Gemini CLI.
+  - Full support: Claude Code, Codex, OpenCode, Pi, October harness, Gemini CLI and Muse (Meta).
   - Replying from Lantern: cmux, Terminal, iTerm2 and tmux.
   - Ghostty, VS Code and Warp: copy and paste for now.
 - **Permissions**, so nobody is surprised during setup: Automation (Terminal / iTerm2, asked on the first reply; browsers, only to read the page address for Point & Ask), Notifications (optional), Microphone and Speech Recognition (only for dictation), Screen Recording (only for Point & Ask and new-session screenshots), Accessibility (only if you let Lantern see which window or document is open, or the selected text). No Full Disk Access.

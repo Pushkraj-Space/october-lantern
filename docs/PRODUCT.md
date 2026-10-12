@@ -125,7 +125,8 @@ Say you have six sessions running in cmux: two Claude Code, two Codex, one OpenC
 | Pi | ✅ | ✅ | ✅ | |
 | October harness (`october`) | ✅ | ✅ | ✅ | October's own agent, built on Pi. Built in: installed on first use when it isn't on your PATH, and the default agent for new sessions |
 | Gemini CLI | ✅ | ✅ | ✅ | |
-| Grok, Cursor Agent, Qwen Code, Goose, Aider, Amp, GitHub Copilot CLI, Kimi, Droid, Crush, Auggie, Muse (Meta) | ✅ | — | — | Shown as *Running*; you can still reply and jump to them |
+| Muse (Meta) | ✅ | ✅ | ✅ | Exact session matching. When Muse asks to approve a tool, the card shows what it wants; answer in its terminal |
+| Grok, Cursor Agent, Qwen Code, Goose, Aider, Amp, GitHub Copilot CLI, Kimi, Droid, Crush, Auggie | ✅ | — | — | Shown as *Running*; you can still reply and jump to them |
 
 Headless runs (for example `claude -p` or `codex exec` in a script) are ignored on purpose, because there's no one to answer them.
 
@@ -149,7 +150,7 @@ Lantern is in **beta (v0.5.0)**.
 | macOS app (macOS 14+, Apple silicon and Intel), signed and notarized | ✅ |
 | Automatic updates | ✅ |
 | Finds agents in any terminal | ✅ |
-| Working / your-turn status, last message, chat view | ✅ Claude Code, Codex, OpenCode, Pi, October harness, Gemini CLI |
+| Working / your-turn status, last message, chat view | ✅ Claude Code, Codex, OpenCode, Pi, October harness, Gemini CLI, Muse |
 | Reply from Lantern | ✅ cmux, Terminal, iTerm2, tmux. Other terminals: copy and paste. |
 | Allow / Deny permission prompts | ✅ Claude Code with hooks on, in cmux, iTerm2 and tmux. The card shows the tool and the full command being approved. The key is only pressed if that prompt is still the one on screen. |
 | Jump to the agent's exact tab | ✅ cmux, Terminal, iTerm2, tmux |
@@ -289,7 +290,7 @@ Yes. The core app is free forever, and no account is needed. A paid October plan
   1. reads the process table and picks out interactive agent processes by executable name (including `node`/`bun`/`python` wrappers);
   2. finds the app each one runs in by walking up its parent processes, and matches its terminal against tmux panes;
   3. works out how to type into it: tmux, cmux (from the `CMUX_WORKSPACE_ID` / `CMUX_SURFACE_ID` in the agent's environment), or Terminal / iTerm2 (AppleScript, matching the tab's tty);
-  4. reads each agent's session to decide *working* vs *your turn* and get the last message and title. It uses Claude Code transcripts (each entry's `stop_reason` and timestamp), Codex rollout files (found through the process's open files; turn events carry their own times), OpenCode's SQLite database (read-only), Pi and October harness JSONL, and Gemini CLI JSONL; the last three are matched by folder and start time;
+  4. reads each agent's session to decide *working* vs *your turn* and get the last message and title. It uses Claude Code transcripts (each entry's `stop_reason` and timestamp), Codex rollout files (found through the process's open files; turn events carry their own times), OpenCode's SQLite database (read-only), Pi and October harness JSONL, and Gemini CLI JSONL (these three matched by folder and start time), and Muse's session event log (found through the session lock the process holds open; a run's start and end mark the turn, and a tool approval with no decision is a question for you);
   5. merges hook events (from `lantern-engine hook ...`), using whichever is newer;
   6. sends the app a snapshot whenever something changed.
 
