@@ -25,7 +25,7 @@ Sent when anything changes, and at least every 10 seconds.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | `"<kind>:<pid>:<start time>"`. Stable while the process lives; a reused pid is a different agent. |
-| `kind` | string | `claude`, `codex`, `opencode`, `pi`, `october` (the October harness), `gemini`, `grok`, `cursor`, `qwen`, `goose`, `aider`, `amp`, `copilot`, `kimi`, `droid`, `crush`, `auggie`. Clients should accept unknown values. |
+| `kind` | string | `claude`, `codex`, `opencode`, `pi`, `october` (the October harness), `gemini`, `grok`, `cursor`, `qwen`, `goose`, `aider`, `amp`, `copilot`, `kimi`, `droid`, `muse`, `crush`, `auggie`. Clients should accept unknown values. |
 | `handle` | string | Display handle, e.g. `"claude-2"`. Numbered per kind. A number stays with its agent for the agent's whole life, and a new agent takes the lowest free number. |
 | `pid` | number | |
 | `startTime` | number | Seconds since the epoch when the process started. Delivery checks the process still has it. |

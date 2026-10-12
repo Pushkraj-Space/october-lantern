@@ -36,6 +36,8 @@ fn classifies_agents_and_skips_helpers() {
     assert_eq!(scanner::classify(&proc(&["/opt/homebrew/bin/opencode"])), Some(Kind::Opencode));
     assert_eq!(scanner::classify(&proc(&["node", "/usr/local/bin/pi"])), Some(Kind::Pi));
     assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/cursor-agent"])), Some(Kind::Cursor));
+    assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/muse-bin-1.4.6-R6000.1"])), Some(Kind::Muse));
+    assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/muse-bin-1.4.6-R6000.1", "exec", "hi"])), None);
     // Helpers and headless runs aren't agents you can answer.
     assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/claude", "daemon", "run"])), None);
     assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/claude", "-p", "hi"])), None);

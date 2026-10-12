@@ -37,7 +37,8 @@ pub fn flag(kind: Kind) -> Option<&'static str> {
         | Kind::Qwen
         | Kind::Aider
         | Kind::Cursor
-        | Kind::Copilot => Some("--model"),
+        | Kind::Copilot
+        | Kind::Muse => Some("--model"),
         _ => None,
     }
 }

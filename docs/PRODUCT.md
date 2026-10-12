@@ -68,7 +68,7 @@ Lantern does **not** replace your terminals. Your agents keep running exactly wh
 - **Amber glow with a number:** that many agents have finished or are asking you something since you last looked.
 - **Amber glow, no number:** agents are still waiting, but you've already seen them.
 
-**Clicking the lantern** opens **Ask Lantern**: ask anything or tell it what to do (clicking it again closes the panel). The stack button opens your agents' cards (Waiting, then all agents). Right-click the lantern for everything else: Ask Lantern, Your Agents, New Session, Point & Ask, Dictate, October, Settings.
+**Clicking the lantern** opens **Ask Lantern**: ask anything or tell it what to do (clicking it again closes the panel). The stack button opens your agents' cards (Waiting, then all agents). Right-click the lantern for everything else: Ask Lantern, Your Agents, New Session, Point & Ask, Dictate, October, Settings, Quit (also in the menu bar icon, which a full menu bar can hide).
 
 **Expanded.** Hover over the lantern and it grows downward into a glass capsule with three buttons: **Your agents**, **New session (+)** and **Point & Ask**. It tucks back in when the mouse leaves. Drag the lantern to move it; it snaps to the nearest screen edge.
 
@@ -125,7 +125,7 @@ Say you have six sessions running in cmux: two Claude Code, two Codex, one OpenC
 | Pi | ✅ | ✅ | ✅ | |
 | October harness (`october`) | ✅ | ✅ | ✅ | October's own agent, built on Pi. Built in: installed on first use when it isn't on your PATH, and the default agent for new sessions |
 | Gemini CLI | ✅ | ✅ | ✅ | |
-| Grok, Cursor Agent, Qwen Code, Goose, Aider, Amp, GitHub Copilot CLI, Kimi, Droid, Crush, Auggie | ✅ | — | — | Shown as *Running*; you can still reply and jump to them |
+| Grok, Cursor Agent, Qwen Code, Goose, Aider, Amp, GitHub Copilot CLI, Kimi, Droid, Crush, Auggie, Muse (Meta) | ✅ | — | — | Shown as *Running*; you can still reply and jump to them |
 
 Headless runs (for example `claude -p` or `codex exec` in a script) are ignored on purpose, because there's no one to answer them.
 

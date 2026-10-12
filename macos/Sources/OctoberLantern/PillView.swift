@@ -35,6 +35,9 @@ struct PillView: View {
                 Divider()
                 Button("October…") { model.panel = .october }
                 Button("Settings…") { onMenu() }
+                Divider()
+                // Also in the menu bar icon's menu, which a full menu bar can hide.
+                Button("Quit October Lantern") { NSApp.terminate(nil) }
             }
             .overlay(alignment: .topTrailing) {
                 if let engineProblem {

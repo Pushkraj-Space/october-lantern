@@ -23,7 +23,7 @@ use crate::tmux;
 
 pub const LANTERN_SOCKET: &str = "lantern";
 
-const ALL: [Kind; 17] = [
+const ALL: [Kind; 18] = [
     Kind::Claude,
     Kind::Codex,
     Kind::Opencode,
@@ -40,6 +40,7 @@ const ALL: [Kind; 17] = [
     Kind::Droid,
     Kind::Crush,
     Kind::Auggie,
+    Kind::Muse,
     Kind::October,
 ];
 
@@ -151,7 +152,7 @@ enum PromptArg {
 
 fn prompt_arg(kind: Kind) -> Option<PromptArg> {
     match kind {
-        Kind::Claude | Kind::Codex | Kind::Grok | Kind::October | Kind::Pi | Kind::Gemini => Some(PromptArg::Positional),
+        Kind::Claude | Kind::Codex | Kind::Grok | Kind::October | Kind::Pi | Kind::Gemini | Kind::Muse => Some(PromptArg::Positional),
         Kind::Opencode => Some(PromptArg::Option("--prompt")),
         _ => None,
     }

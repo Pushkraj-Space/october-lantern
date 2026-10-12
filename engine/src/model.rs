@@ -23,6 +23,8 @@ pub enum Kind {
     Droid,
     Crush,
     Auggie,
+    /// Meta's Muse (`muse`, which runs as a versioned `muse-bin-<version>`).
+    Muse,
     /// The October harness (`october`), a Pi fork.
     October,
 }
@@ -46,6 +48,7 @@ impl Kind {
             Kind::Droid => "droid",
             Kind::Crush => "crush",
             Kind::Auggie => "auggie",
+            Kind::Muse => "muse",
             Kind::October => "october",
         }
     }
@@ -69,6 +72,8 @@ impl Kind {
             "droid" => Kind::Droid,
             "crush" => Kind::Crush,
             "auggie" => Kind::Auggie,
+            // The launcher (`muse`) execs a versioned binary, `muse-bin-1.4.6-R6000.1`.
+            p if p == "muse" || p.starts_with("muse-bin-") => Kind::Muse,
             "october" => Kind::October,
             _ => return None,
         })
