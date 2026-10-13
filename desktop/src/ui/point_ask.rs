@@ -362,6 +362,11 @@ fn footer(ui: &mut Ui, cx: &mut Ctx) {
             if signed_in { Color32::TRANSPARENT } else { t::opacity(t::AMBER, 0.6) },
         )
     };
+    let response = if signed_in {
+        response
+    } else {
+        response.on_hover_text("Ask answers right here with October's AI. Sign in to October to use it.")
+    };
     if response.clicked() {
         if signed_in {
             cx.emit(UiAction::SubmitPointAsk);
