@@ -100,7 +100,7 @@ fn tabs(ui: &mut Ui, cx: &mut Ctx) {
 }
 
 /// Grouped Form metrics (Mac settings-0..3): rows 38pt tall with 10pt side padding, hairlines
-/// between rows inset to that padding, bold ink section headings.
+/// between rows (captions included) inset to that padding, bold ink section headings.
 const ROW: f32 = 38.0;
 const ROW_PAD: f32 = 10.0;
 
@@ -130,7 +130,7 @@ fn group(ui: &mut Ui, title: Option<&str>, body: impl FnOnce(&mut Ui)) {
     });
 }
 
-/// A hairline above every row but a group's first. Captions skip it, staying with their row.
+/// A hairline above every row but a group's first, captions included.
 fn divider(ui: &mut Ui) {
     let top = ui.ctx().data(|data| data.get_temp::<f32>(group_top_id()));
     let y = ui.cursor().top();
@@ -151,9 +151,10 @@ fn row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
+/// A Form footnote row (Mac settings-0/3): its own block below a hairline, 10pt above and below.
 fn caption(ui: &mut Ui, text: &str) {
-    // Tucked under the row it explains (no hairline between them).
-    ui.add_space(-5.0);
+    divider(ui);
+    ui.add_space(10.0);
     c::label(ui, text, 11.0, Weight::Regular, t::MUTED);
     ui.add_space(10.0);
 }
@@ -302,8 +303,9 @@ fn general(ui: &mut Ui, cx: &mut Ctx) {
             cx.model.prefs.toolkit_in_sessions,
             SettingChange::ToolkitInSessions,
         );
-        // The toolkit's caption sits beside its two buttons, under the toggle it explains.
-        ui.add_space(-5.0);
+        // The toolkit's caption sits beside its two buttons, in a caption block of its own.
+        divider(ui);
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
             let buttons_width = ["Open List", "Refresh"].into_iter().map(|title| {
                 ui.painter().layout_no_wrap(title.into(), t::font(12.0, Weight::Medium), t::INK).size().x
