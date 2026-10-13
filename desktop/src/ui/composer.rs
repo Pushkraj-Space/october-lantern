@@ -73,7 +73,8 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx, agent: &Agent) {
                             if cx.model.dictating { "Stop dictation" } else { "Dictate" },
                         )
                     });
-                    if mic_response.on_hover_text(if cx.model.dictating { "Stop dictation" } else { "Dictate" }).clicked() {
+                    // These backends open the recorder directly; there is no permission-wait stage.
+                    if mic_response.on_hover_text("Dictate").clicked() {
                         cx.emit(UiAction::ToggleDictation { owner: DictationOwner::Reply(agent.id.clone()) });
                     }
                     let enabled =

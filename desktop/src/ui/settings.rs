@@ -1,5 +1,5 @@
 //! SettingsView.swift: four tabs in an ordinary dark, fixed-size window. Native Form/TabView
-//! metrics are provisional until compared with Mac settings-0..3 snapshots; not panel glass.
+//! controls follow the maintainer's review; exact fill/metrics await Mac settings-0..3 snapshots.
 use super::{
     Ctx, SettingChange, UiAction, cards, components as c,
     icons::Icon,
@@ -10,7 +10,7 @@ use eframe::egui::{self, Align, Color32, Layout, Rect, Sense, Stroke, Ui, vec2};
 
 const SIZE: egui::Vec2 = vec2(520.0, 480.0);
 const BACKGROUND: Color32 = Color32::from_gray(30);
-const GROUP: Color32 = Color32::from_gray(39);
+const GROUP: Color32 = Color32::from_gray(43);
 // SettingsView.swift's help predates area selection and signed-in Ask routing.
 const POINT_ASK_HELP: &str = "Hold the shortcut, select an area and say what you want. A card shows a screenshot of it; Enter asks October, or sends it to the agent.";
 
@@ -52,29 +52,26 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx) -> f32 {
 
 fn tabs(ui: &mut Ui, cx: &mut Ctx) {
     let (row, _) = ui.allocate_exact_size(vec2(520.0, 48.0), Sense::hover());
-    let width = 96.0;
-    for (index, (title, icon)) in
-        [("General", Icon::Settings), ("Agents", Icon::Layers), ("October", Icon::Leaf), ("About", Icon::Info)].into_iter().enumerate()
-    {
-        let rect =
-            Rect::from_min_size(egui::pos2(row.center().x - width * 2.0 + index as f32 * width, row.top() + 10.0), vec2(width, 28.0));
-        let selected = cx.view.settings_tab.min(3) == index;
+    let container = Rect::from_center_size(row.center(), vec2(320.0, 26.0));
+    ui.painter().rect_filled(container, 6, t::white(0.07));
+    ui.painter().rect_stroke(container, 6, Stroke::new(1.0, t::HAIRLINE), egui::StrokeKind::Inside);
+    let selected_index = cx.view.settings_tab.min(3);
+    for (index, title) in ["General", "Agents", "October", "About"].into_iter().enumerate() {
+        let rect = Rect::from_min_size(container.min + vec2(index as f32 * 80.0, 0.0), vec2(80.0, 26.0)).shrink(1.0);
+        let selected = selected_index == index;
         let response = ui.interact(rect, egui::Id::new(("settings-tab", index)), Sense::click());
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, title));
         if selected || response.hovered() {
-            ui.painter().rect_filled(rect, 6, t::white(if selected { 0.14 } else { 0.06 }));
+            ui.painter().rect_filled(rect, 5, t::white(if selected { 0.18 } else { 0.06 }));
+        }
+        if index > 0 && selected_index != index && selected_index != index - 1 {
+            ui.painter().vline(rect.left() - 1.0, (rect.top() + 5.0)..=(rect.bottom() - 5.0), Stroke::new(1.0, t::STROKE));
         }
         if response.has_focus() {
-            ui.painter().rect_stroke(rect, 6, Stroke::new(1.0, t::LINK), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, 5, Stroke::new(1.0, t::LINK), egui::StrokeKind::Inside);
         }
-        c::paint_icon(
-            ui.painter(),
-            Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), vec2(14.0, 14.0)),
-            icon,
-            if selected { t::INK } else { t::MUTED },
-        );
-        let galley = ui.painter().layout_no_wrap(title.into(), t::font(12.0, Weight::Medium), if selected { t::INK } else { t::MUTED });
-        ui.painter().galley(egui::pos2(rect.left() + 27.0, rect.center().y - galley.size().y / 2.0), galley, t::INK);
+        let galley = ui.painter().layout_no_wrap(title.into(), t::font(12.0, Weight::Medium), t::INK);
+        ui.painter().galley(rect.center() - galley.size() / 2.0, galley, t::INK);
         if response.clicked() {
             cx.view.settings_tab = index;
         }
@@ -86,18 +83,41 @@ fn group(ui: &mut Ui, title: Option<&str>, body: impl FnOnce(&mut Ui)) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
         if let Some(title) = title {
-            c::label(ui, title, 12.0, Weight::Semibold, t::MUTED);
+            c::label(ui, title, 13.0, Weight::Semibold, t::INK);
         }
-        egui::Frame::new().fill(GROUP).corner_radius(8).inner_margin(12).show(ui, |ui| {
+        egui::Frame::new().fill(GROUP).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 0)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 8.0;
+            ui.spacing_mut().item_spacing.y = 0.0;
             body(ui);
         });
     });
 }
 
 fn caption(ui: &mut Ui, text: &str) {
-    c::label(ui, text, 11.0, Weight::Regular, t::MUTED);
+    egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 0, top: 4, bottom: 8 }).show(ui, |ui| {
+        c::label(ui, text, 11.0, Weight::Regular, t::MUTED);
+    });
+}
+
+// Called only for a new logical form row: captions remain attached to the preceding row.
+fn begin_row(ui: &mut Ui) {
+    if ui.min_rect().height() > 0.5 {
+        let y = ui.cursor().top();
+        ui.painter().hline(ui.cursor().left()..=ui.max_rect().right() + 12.0, y, Stroke::new(0.5, t::HAIRLINE));
+    }
+}
+
+fn form_row<R>(ui: &mut Ui, body: impl FnOnce(&mut Ui) -> R) -> R {
+    form_row_height(ui, 36.0, body)
+}
+
+fn form_row_height<R>(ui: &mut Ui, height: f32, body: impl FnOnce(&mut Ui) -> R) -> R {
+    begin_row(ui);
+    ui.allocate_ui_with_layout(vec2(ui.available_width(), height), Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_height(height);
+        body(ui)
+    })
+    .inner
 }
 
 fn toggle(ui: &mut Ui, cx: &mut Ctx, title: &str, current: bool, change: impl FnOnce(bool) -> SettingChange) {
@@ -107,8 +127,9 @@ fn toggle(ui: &mut Ui, cx: &mut Ctx, title: &str, current: bool, change: impl Fn
 }
 
 /// GroupedFormStyle puts labels first and a mini switch at the trailing edge. These
-/// ordinary-control metrics are provisional pending Lantern's native Mac Settings goldens.
+/// labels and controls share a 36pt minimum row, with captions outside the hit area.
 fn setting_switch(ui: &mut Ui, title: &str, current: bool, agent: Option<(&super::Assets, &AgentKind)>) -> Option<bool> {
+    begin_row(ui);
     let enabled = ui.is_enabled();
     let ink = if enabled { t::INK } else { t::opacity(t::INK, 0.45) };
     let width = ui.available_width();
@@ -117,7 +138,7 @@ fn setting_switch(ui: &mut Ui, title: &str, current: bool, agent: Option<(&super
     let label = ui.painter().layout(title.into(), t::font(13.0, Weight::Regular), ink, (width - 26.0 - gap - logo_width).max(1.0));
     // Measure once: wrapped labels, logos and the switch share the same row center.
     // A zero-height child layout centers text relative to a different baseline.
-    let (row, _) = ui.allocate_exact_size(vec2(width, label.rect.height().max(22.0)), Sense::hover());
+    let (row, _) = ui.allocate_exact_size(vec2(width, label.rect.height().max(36.0)), Sense::hover());
     if let Some((assets, kind)) = agent {
         let rect = Rect::from_center_size(egui::pos2(row.left() + 9.0, row.center().y), vec2(18.0, 18.0));
         let mut logo =
@@ -128,7 +149,7 @@ fn setting_switch(ui: &mut Ui, title: &str, current: bool, agent: Option<(&super
     let response = ui.interact(row, egui::Id::new(("settings-switch", title)), Sense::click());
     let on = if response.clicked() { !current } else { current };
     let track = Rect::from_center_size(egui::pos2(row.right() - 13.0, row.center().y), vec2(26.0, 15.0));
-    let fill = if on { t::LINK } else { t::white(0.2) };
+    let fill = if on { t::LINK } else { t::white(0.26) };
     ui.painter().rect_filled(track, 7.5, if enabled { fill } else { t::opacity(fill, 0.35) });
     ui.painter().circle_filled(egui::pos2(if on { track.right() - 7.5 } else { track.left() + 7.5 }, track.center().y), 6.0, ink);
     if response.has_focus() {
@@ -141,8 +162,11 @@ fn setting_switch(ui: &mut Ui, title: &str, current: bool, agent: Option<(&super
 
 fn picker(ui: &mut Ui, title: &str, current: &str, options: &[&str], help: Option<&str>, label: impl Fn(&str) -> String) -> Option<String> {
     let mut selected = current.to_owned();
-    ui.horizontal(|ui| {
-        let label_width = ui.available_width() - 170.0 - ui.spacing().item_spacing.x;
+    form_row(ui, |ui| {
+        let value = label(current);
+        let galley = ui.painter().layout_no_wrap(value.clone(), t::font(12.0, Weight::Regular), t::INK);
+        let picker_width = galley.size().x + 24.0;
+        let label_width = ui.available_width() - picker_width - ui.spacing().item_spacing.x;
         let label_response = ui
             .allocate_ui_with_layout(vec2(label_width, 24.0), Layout::left_to_right(Align::Center), |ui| {
                 ui.set_min_width(label_width);
@@ -150,16 +174,37 @@ fn picker(ui: &mut Ui, title: &str, current: &str, options: &[&str], help: Optio
             })
             .inner;
         let label_response = if let Some(help) = help { label_response.on_hover_text(help) } else { label_response };
-        let response = egui::ComboBox::from_id_salt(title)
-            .width(170.0)
-            .selected_text(c::text(label(current), 12.0, Weight::Regular, t::INK))
-            .show_ui(ui, |ui| {
-                for value in options {
-                    ui.selectable_value(&mut selected, (*value).to_owned(), label(value));
+        let popup_style = ui.style().as_ref().clone();
+        let response = ui
+            .scope(|ui| {
+                // ComboBox still owns popup and keyboard behavior; its closed button is unboxed.
+                let widgets = &mut ui.visuals_mut().widgets;
+                for visual in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
+                    visual.bg_fill = Color32::TRANSPARENT;
+                    visual.weak_bg_fill = Color32::TRANSPARENT;
+                    visual.bg_stroke = Stroke::NONE;
                 }
+                ui.spacing_mut().button_padding = vec2(0.0, 4.0);
+                ui.spacing_mut().icon_width = 12.0;
+                egui::ComboBox::from_id_salt(title)
+                    .width(picker_width)
+                    .selected_text(c::text(value, 12.0, Weight::Regular, t::INK))
+                    .icon(|ui, rect, _, _| {
+                        c::paint_icon(ui.painter(), rect.shrink(1.0), Icon::ChevronUpDown, t::INK);
+                    })
+                    .popup_style(egui::style::StyleModifier::from(popup_style))
+                    .show_ui(ui, |ui| {
+                        for value in options {
+                            ui.selectable_value(&mut selected, (*value).to_owned(), label(value));
+                        }
+                    })
+                    .response
             })
-            .response
+            .inner
             .labelled_by(label_response.id);
+        if response.has_focus() {
+            ui.painter().rect_stroke(response.rect, 4, Stroke::new(1.0, t::LINK), egui::StrokeKind::Inside);
+        }
         if let Some(help) = help {
             response.on_hover_text(help);
         }
@@ -237,7 +282,7 @@ fn general(ui: &mut Ui, cx: &mut Ctx) {
     group(ui, Some("Notifications"), |ui| {
         toggle(ui, cx, "Notify me when an agent needs me", cx.model.prefs.notifications, SettingChange::NotificationsEnabled);
         if cx.model.prefs.notifications && cx.model.system.notifications_allowed == Some(false) {
-            ui.horizontal(|ui| {
+            form_row(ui, |ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
                 c::paint_icon(ui.painter(), rect, Icon::Warning, t::AMBER);
                 c::label(ui, "Off in System Settings", 12.0, Weight::Medium, t::AMBER);
@@ -252,6 +297,8 @@ fn general(ui: &mut Ui, cx: &mut Ctx) {
                 "Your desktop is blocking Lantern's notifications. Allow them for October Lantern in your system's notification settings.",
             );
         }
+        // The enabled-state child starts empty, so the parent owns this row's divider.
+        begin_row(ui);
         ui.add_enabled_ui(cx.model.prefs.notifications, |ui| {
             toggle(ui, cx, "Also when an agent finishes its turn", cx.model.prefs.notify_finished, SettingChange::NotifyOnFinish)
         });
@@ -259,7 +306,7 @@ fn general(ui: &mut Ui, cx: &mut Ctx) {
             ui,
             "Questions and permission prompts always notify (when notifications are on). Notifications are skipped for agents you've muted in Agents.",
         );
-        if cx.model.system.notifications_allowed != Some(false) && ui.button("Open Notification Settings…").clicked() {
+        if cx.model.system.notifications_allowed != Some(false) && form_row(ui, |ui| ui.button("Open Notification Settings…")).clicked() {
             cx.emit(UiAction::OpenNotificationSettings);
         }
     });
@@ -274,7 +321,7 @@ fn hooks(ui: &mut Ui, cx: &mut Ctx) {
         any |= state != HookState::Off;
         installed &= state == HookState::On;
         outdated |= state == HookState::NeedsUpdate;
-        ui.horizontal(|ui| {
+        form_row(ui, |ui| {
             c::label(ui, title, 13.0, Weight::Regular, t::INK);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (label, color, icon) = match state {
@@ -290,7 +337,7 @@ fn hooks(ui: &mut Ui, cx: &mut Ctx) {
             });
         });
     }
-    ui.horizontal(|ui| {
+    form_row(ui, |ui| {
         if cx.model.system.hooks_busy {
             c::spinner(ui, 12.0, t::MUTED, cx.env);
         }
@@ -332,7 +379,7 @@ fn agents(ui: &mut Ui, cx: &mut Ctx) {
     group(ui, Some("Count in Waiting and notify"), |ui| {
         for kind in [
             "claude", "codex", "opencode", "pi", "october", "gemini", "grok", "cursor", "qwen", "goose", "aider", "amp", "copilot", "kimi",
-            "droid", "crush", "auggie",
+            "droid", "crush", "auggie", "muse",
         ] {
             let kind = AgentKind::new(kind);
             if let Some(counts) = setting_switch(ui, &kind.display_name(), cx.model.prefs.counts(&kind), Some((cx.assets, &kind))) {
@@ -358,10 +405,10 @@ fn october(ui: &mut Ui, cx: &mut Ctx) {
 
 fn about(ui: &mut Ui, cx: &mut Ctx) {
     group(ui, None, |ui| {
-        ui.horizontal(|ui| {
+        form_row_height(ui, 72.0, |ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
             ui.add(egui::Image::new(&cx.assets.logo).fit_to_exact_size(vec2(52.0, 52.0)));
-            ui.vertical(|ui| {
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), 38.0), Layout::top_down(Align::Min), |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 c::label(ui, "October Lantern", 17.0, Weight::Bold, t::INK);
                 c::label(ui, format!("Version {}", cx.model.system.version), 13.0, Weight::Regular, t::MUTED);
@@ -375,7 +422,7 @@ fn about(ui: &mut Ui, cx: &mut Ctx) {
         } else {
             "Check for Updates…"
         };
-        if ui.add_enabled(!cx.model.system.checking_updates, egui::Button::new(title)).clicked() {
+        if form_row(ui, |ui| ui.add_enabled(!cx.model.system.checking_updates, egui::Button::new(title))).clicked() {
             cx.emit(UiAction::CheckUpdates);
         }
         if let Some(update) = &cx.model.system.update {
@@ -384,21 +431,21 @@ fn about(ui: &mut Ui, cx: &mut Ctx) {
     });
     // No analytics transport exists: equivalent to Swift Analytics.available == false.
     group(ui, Some("Help"), |ui| {
-        if ui.button("Report a Problem…").clicked() {
+        if form_row(ui, |ui| ui.button("Report a Problem…")).clicked() {
             cx.emit(UiAction::ReportProblem);
         }
-        if ui.button("Show Welcome Guide").clicked() {
+        if form_row(ui, |ui| ui.button("Show Welcome Guide")).clicked() {
             cx.emit(UiAction::ShowWelcome);
         }
-        if ui.link("lantern.october.dev").clicked() {
+        if form_row(ui, |ui| ui.link("lantern.october.dev")).clicked() {
             cx.emit(UiAction::OpenUrl("https://lantern.october.dev".into()));
         }
-        if ui.link("hey@october.dev").clicked() {
+        if form_row(ui, |ui| ui.link("hey@october.dev")).clicked() {
             cx.emit(UiAction::OpenUrl("mailto:hey@october.dev".into()));
         }
     });
     group(ui, None, |ui| {
-        if ui.button(c::text("Uninstall October Lantern…", 13.0, Weight::Regular, t::RED)).clicked() {
+        if form_row(ui, |ui| ui.button(c::text("Uninstall October Lantern…", 13.0, Weight::Regular, t::INK))).clicked() {
             cx.view.settings_uninstall = true;
         }
         caption(

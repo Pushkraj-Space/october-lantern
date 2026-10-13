@@ -357,7 +357,14 @@ pub fn permission_buttons(ui: &mut Ui, cx: &mut Ctx, agent: &Agent) {
             );
             ui.painter().galley(egui::pos2(left + 18.0, rect.center().y - galley.size().y / 2.0), galley, ink);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title));
-            if response.clicked() {
+            if response
+                .on_hover_text(if allow {
+                    "Allow once: presses 1 in the agent's terminal, if this is still the prompt on screen"
+                } else {
+                    "Decline (presses Escape), then tell the agent what to do instead"
+                })
+                .clicked()
+            {
                 cx.emit(UiAction::AnswerPermission { agent_id: agent.id.clone(), prompt_id: prompt_id.clone(), allow });
             }
         }

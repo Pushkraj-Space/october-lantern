@@ -227,11 +227,12 @@ fn note(ui: &mut Ui, body: &str) {
 }
 
 pub fn without_lantern_notes(source: &str) -> &str {
-    const MARKERS: [&str; 4] = [
+    const MARKERS: [&str; 5] = [
         "\n\nYou're connected to October Bus",
         "\n\n(Started from October Lantern",
         "\n\nFor context, a screenshot of my screen",
         "\n\nWhat this Mac already has",
+        "\n\nWhat this computer already has",
     ];
     &source[..MARKERS.iter().filter_map(|marker| source.find(marker)).min().unwrap_or(source.len())]
 }
@@ -269,6 +270,26 @@ mod tests {
         assert_eq!(without_lantern_notes(original), "Find it.");
         assert!(original.contains("/tmp/a"));
         assert_eq!(without_lantern_notes("A normal message"), "A normal message");
+    }
+    #[test]
+    fn first_messages_hide_toolkit_and_guidance_for_every_platform() {
+        let prompt = "Find the project and fix its tests.";
+        // launch::first_message + with_guidance wire format. In particular toolkit-only
+        // sessions must hide the toolkit even when no earlier screenshot/bus marker exists.
+        for (heading, os, cwd) in [
+            ("Mac", "macOS", "/Users/name/project"),
+            ("computer", "Linux", "/home/name/project"),
+            ("computer", "Windows", r"C:\Users\name\project"),
+        ] {
+            for earlier in
+                ["", "\n\nFor context, a screenshot of my screen when I started this session: shot.png\n\nYou're connected to October Bus"]
+            {
+                let first = format!(
+                    "{prompt}{earlier}\n\nWhat this {heading} already has (from Lantern's toolkit list; prefer these over installing new tools):\ngit, rust\n\n(Started from October Lantern on {os}. You're in {cwd}. When you mention a file or folder, give its full absolute path.)"
+                );
+                assert_eq!(without_lantern_notes(&first), prompt, "{os}");
+            }
+        }
     }
     #[test]
     fn repeated_message_keys_are_unique_and_survive_window_trimming() {

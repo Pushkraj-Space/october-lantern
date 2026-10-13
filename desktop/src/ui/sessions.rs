@@ -173,8 +173,11 @@ fn agents(ui: &mut Ui, cx: &mut Ctx, selected: Option<&AgentKind>) {
                 cx.emit(UiAction::ChooseSessionAgent { kind: kind.clone() });
             }
         }
-        let others: Vec<_> =
-            AgentKind::SUPPORTED.iter().map(|kind| AgentKind::new(kind)).filter(|kind| !installed.contains(kind)).collect();
+        let others: Vec<_> = AgentKind::SUPPORTED
+            .iter()
+            .map(|kind| AgentKind::new(kind))
+            .filter(|kind| !installed.contains(kind) && kind.website().is_some())
+            .collect();
         if installed.len() > 5 || !others.is_empty() {
             let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, 28.0), Sense::click());
             ui.painter().rect_filled(rect, 14.0, t::FAINT);
@@ -366,8 +369,22 @@ pub fn field(ui: &mut Ui, id: &str, icon: Icon, value: &str) -> Response {
 
 fn folder(ui: &mut Ui, cx: &mut Ctx) {
     let selected = selected_folder(cx);
-    let response =
-        field(ui, "session-folder", Icon::Folder, &selected.as_ref().map_or_else(|| "Choose a folder…".into(), |f| short(f, &cx.env.home)));
+    let value = selected.as_ref().map_or_else(|| "Choose a folder…".into(), |f| short(f, &cx.env.home));
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 31.0), Sense::hover());
+    let response = ui.interact(rect, ui.make_persistent_id("session-folder"), Sense::click());
+    c::paint_icon(
+        ui.painter(),
+        Rect::from_center_size(egui::pos2(rect.left() + 6.25, rect.center().y), egui::Vec2::splat(12.5)),
+        Icon::Folder,
+        t::white(0.9),
+    );
+    let display = middle_truncate(ui, &value, 12.5, Weight::Regular, rect.width() - 22.0);
+    let galley = ui.painter().layout_no_wrap(display, t::font(12.5, Weight::Regular), t::white(0.9));
+    ui.painter().galley(egui::pos2(rect.left() + 20.5, rect.center().y - galley.size().y / 2.0), galley, t::INK);
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect, 4, Stroke::new(1.0, t::AMBER), egui::StrokeKind::Inside);
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), &value));
     let response = response
         .on_hover_text(selected.as_ref().map_or_else(|| "Choose a folder".into(), |f| format!("Runs in {}", short(f, &cx.env.home))));
     egui::Popup::menu(&response).show(|ui| {

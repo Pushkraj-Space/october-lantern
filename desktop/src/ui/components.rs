@@ -131,11 +131,11 @@ pub fn paint_glass(painter: &Painter, rect: Rect, radius: f32, tint: f32) {
     painter.add(glass_shape(rect, radius, tint));
 }
 
-/// Preserve the source tint when native backdrop blur is available. Without it, use a
-/// denser translucent fallback so sharp wallpaper does not overwhelm the content.
+/// Use the source tint except where the platform requests a denser no-blur fallback
+/// (Linux without compositor blur), so sharp wallpaper does not overwhelm the content.
 /// This is an opacity fallback, not an implementation of live backdrop blur.
-pub fn material_tint(tint: f32, backdrop_blur: bool) -> f32 {
-    if backdrop_blur { tint } else { tint.max((0.85 - 0.35) / 0.65) }
+pub fn material_tint(tint: f32, dense_glass: bool) -> f32 {
+    if dense_glass { tint.max((0.85 - 0.35) / 0.65) } else { tint }
 }
 
 /// Reserved-slot version, for surfaces whose measured height is only known after layout.
@@ -232,7 +232,7 @@ pub fn state_chip(ui: &mut Ui, agent: &Agent) -> Response {
         ui.painter().rect_filled(rect, rect.height() / 2.0, theme::FAINT);
         ui.painter().galley(rect.min + egui::vec2(7.0, 2.0), galley, theme::MUTED);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), "Recent"));
-        return response;
+        return response.on_hover_text(format!("A {} session that isn't running now", agent.source.as_deref().unwrap_or("app")));
     }
     let color = if agent.state.wants_you() { theme::AMBER } else { theme::MUTED };
     let galley = ui.painter().layout_no_wrap(theme::state_label(agent.state).into(), theme::font(11.0, Weight::Medium), color);
@@ -454,9 +454,6 @@ mod tests {
                         Wifi,
                         Video,
                         Photo,
-                        Settings,
-                        Leaf,
-                        Info,
                         AccountCircle,
                         Mail,
                         Play,
@@ -524,8 +521,8 @@ mod tests {
     #[test]
     fn material_fallback_reaches_eighty_five_percent_without_lightening_denser_glass() {
         for tint in [0.45, 0.5, 0.62, 0.9, 1.0] {
-            assert_eq!(material_tint(tint, true), tint);
-            let fallback = material_tint(tint, false);
+            assert_eq!(material_tint(tint, false), tint);
+            let fallback = material_tint(tint, true);
             assert!(fallback >= tint);
             assert!(0.35 + 0.65 * fallback >= 0.85 - f32::EPSILON);
             let Shape::Vec(shapes) = glass_shape(Rect::from_min_size(Pos2::ZERO, egui::vec2(50.0, 100.0)), 22.0, fallback) else {
@@ -536,7 +533,7 @@ mod tests {
             };
             assert!(fill.fill.a() >= 216);
         }
-        assert_eq!(material_tint(0.9, false), 0.9);
+        assert_eq!(material_tint(0.9, true), 0.9);
     }
 
     #[test]

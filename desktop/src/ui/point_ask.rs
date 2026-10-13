@@ -41,7 +41,7 @@ pub fn render(ui: &mut Ui, cx: &mut Ctx, max_height: f32) -> f32 {
     // NOT glassSurface's .35 black overlay. Flatten those tint layers for our renderer:
     // alpha = .88 + outer_tint * .12; premultiplied gray = .08 * .88 = .0704.
     // This deterministic tint is not a substitute for native live backdrop blur.
-    let tint = c::material_tint(0.62, cx.model.caps.backdrop_blur);
+    let tint = c::material_tint(0.62, cx.model.caps.dense_glass);
     let fill = Color32::from_rgba_premultiplied(18, 18, 18, ((0.88 + tint * 0.12) * 255.0).round() as u8);
     ui.painter().set(background, c::rimmed_shape(rect, t::POINT_RADIUS as f32, fill));
     height
@@ -361,6 +361,11 @@ fn footer(ui: &mut Ui, cx: &mut Ctx) {
             fill,
             if signed_in { Color32::TRANSPARENT } else { t::opacity(t::AMBER, 0.6) },
         )
+    };
+    let response = if signed_in {
+        response
+    } else {
+        response.on_hover_text("Ask answers right here with October's AI. Sign in to October to use it.")
     };
     if response.clicked() {
         if signed_in {
