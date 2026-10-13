@@ -220,10 +220,24 @@ pub(crate) fn guidance_for(os: &str, message: String, cwd: &Path) -> String {
     )
 }
 
+/// The toolkit list's heading. The apps hide the first message from it on by matching it exactly:
+/// the Mac app looks for "What this Mac already has", the Windows/Linux app for both.
+pub(crate) fn toolkit_heading(os: &str) -> &'static str {
+    match os {
+        "macos" => "What this Mac already has",
+        _ => "What this computer already has",
+    }
+}
+
 /// The first message: your words, then the context, the screenshot's path and the toolkit list.
 /// Nothing is sent when there are no words and no screenshot (an agent would act on context
 /// alone).
 pub fn first_message(prompt: Option<&str>, extras: Extras) -> Option<String> {
+    first_message_for(std::env::consts::OS, prompt, extras)
+}
+
+/// The first message for the computer the agent runs on (only the toolkit heading differs).
+pub(crate) fn first_message_for(os: &str, prompt: Option<&str>, extras: Extras) -> Option<String> {
     let mut out = match (prompt, extras.screenshot) {
         (Some(p), _) => p.to_string(),
         (None, Some(_)) => "Take a look at the screenshot below, then wait for my instructions.".into(),
@@ -239,9 +253,7 @@ pub fn first_message(prompt: Option<&str>, extras: Extras) -> Option<String> {
         out.push_str(&format!("\n\n{n}"));
     }
     if let Some(t) = extras.toolkit.map(str::trim).filter(|t| !t.is_empty()) {
-        out.push_str(&format!(
-            "\n\nWhat this computer already has (from Lantern's toolkit list; prefer these over installing new tools):\n{t}"
-        ));
+        out.push_str(&format!("\n\n{} (from Lantern's toolkit list; prefer these over installing new tools):\n{t}", toolkit_heading(os)));
     }
     Some(out)
 }

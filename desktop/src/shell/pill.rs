@@ -38,7 +38,7 @@ pub fn help_font() -> egui::FontId {
 pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, out: &mut Vec<UiAction>) -> PillInput {
     let rect = ui.max_rect();
     let painter = ui.painter().clone();
-    paint_glass(&painter, rect, rect.width() / 2.0, material_tint(TINT, model.caps.backdrop_blur));
+    paint_glass(&painter, rect, rect.width() / 2.0, material_tint(TINT, model.caps.dense_glass));
 
     let lantern = Rect::from_min_size(rect.min + vec2(PAD, PAD), vec2(LANTERN, LANTERN));
     let response = ui.interact(lantern, ui.id().with("lantern"), Sense::click_and_drag());
@@ -47,11 +47,12 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
     if response.clicked() {
         out.push(UiAction::TogglePanel(PanelMode::Assistant));
     }
-    let tooltip = match (model.badge(), problem_text(&model.engine)) {
-        (_, Some(problem)) => problem,
-        (0, None) => "Ask Lantern".to_string(),
-        (n, None) => format!("Ask Lantern · {n} new, waiting on you"),
-    };
+    // The "!" badge has its own tooltip; it pokes 2pt out of the lantern, so it's hovered on its
+    // own (hover only: a click on it still reaches the lantern).
+    let problem = problem_text(&model.engine);
+    let on_badge = problem.is_some() && ui.interact(problem_badge(lantern), ui.id().with("problem"), Sense::hover()).hovered();
+    let (tooltip, on_badge) = lantern_help(model.badge(), problem, on_badge);
+    let anchor = if on_badge { problem_badge(lantern) } else { lantern };
     let measure = |text: &str| painter.layout_no_wrap(text.to_string(), help_font(), Color32::WHITE).size();
     let mut input = PillInput {
         drag_started: response.drag_started(),
@@ -60,8 +61,8 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
         help: None,
         menu_at: response.secondary_clicked().then(|| response.interact_pointer_pos()).flatten(),
     };
-    if response.hovered() && !response.dragged() {
-        input.help = Some((tooltip.clone(), lantern, measure(&tooltip)));
+    if (response.hovered() || on_badge) && !response.dragged() {
+        input.help = Some((tooltip.clone(), anchor, measure(&tooltip)));
     }
 
     if expanded {
@@ -70,7 +71,7 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
         y += 1.0 + 2.0 + 6.0;
         let panel = model.panel;
         for (icon, help, active) in [
-            (Icon::Sparkles, "Ask Lantern", panel == Some(PanelMode::Assistant)),
+            (Icon::Sparkles, "Ask Lantern: ask anything, or tell it what to do", panel == Some(PanelMode::Assistant)),
             (Icon::Layers, "Your agents", panel.is_some_and(PanelMode::is_list)),
             (Icon::Plus, "New session, or a task for the app you're in", panel == Some(PanelMode::NewSession)),
             (Icon::PointAsk, "Point & Ask: select part of the screen and ask about it", false),
@@ -104,12 +105,27 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
     input
 }
 
+/// The lantern's tooltip, or the engine's problem when the pointer is on the "!" badge (the
+/// lantern keeps its usual tooltip everywhere else). Says whether the badge's was chosen.
+fn lantern_help(count: usize, problem: Option<String>, on_badge: bool) -> (String, bool) {
+    match (problem.filter(|_| on_badge), count) {
+        (Some(problem), _) => (problem, true),
+        (None, 0) => ("Ask Lantern".into(), false),
+        (None, n) => (format!("{n} new, waiting on you · Ask Lantern"), false),
+    }
+}
+
 fn problem_text(engine: &EngineHealth) -> Option<String> {
     match engine {
         EngineHealth::Ready | EngineHealth::Starting => None,
         EngineHealth::Restarting => Some("Lantern's engine stopped and is restarting. Agents may be out of date.".into()),
         EngineHealth::Failed(message) => Some(format!("Lantern's engine isn't running: {message}")),
     }
+}
+
+/// Where the engine-problem badge sits: the lantern's top right corner.
+fn problem_badge(lantern: Rect) -> Rect {
+    Rect::from_center_size(lantern.right_top() + vec2(-5.0, 5.0), vec2(14.0, 14.0))
 }
 
 /// An exclamation badge at the lantern's top right while the engine isn't running normally.
@@ -119,7 +135,7 @@ fn engine_problem(painter: &egui::Painter, lantern: Rect, engine: &EngineHealth)
         EngineHealth::Failed(_) => theme::RED,
         _ => return,
     };
-    let badge = Rect::from_center_size(lantern.right_top() + vec2(-5.0, 5.0), vec2(14.0, 14.0));
+    let badge = problem_badge(lantern);
     painter.circle_filled(badge.center(), 7.0, color);
     paint_icon(painter, badge.shrink(3.0), Icon::Exclamation, theme::black(0.85));
 }
@@ -165,13 +181,13 @@ fn lantern_button(painter: &egui::Painter, rect: Rect, model: &Model, assets: &A
 mod tests {
     use super::*;
 
-    /// The pill's glass fill alpha, with and without the platform's backdrop blur.
-    fn glass_alpha(backdrop_blur: bool) -> u8 {
+    /// The pill's glass fill alpha, with the Mac's tint or the denser no-blur one.
+    fn glass_alpha(dense_glass: bool) -> u8 {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let assets = Assets::load(&ctx);
         let mut model = Model::default();
-        model.caps.backdrop_blur = backdrop_blur;
+        model.caps.dense_glass = dense_glass;
         let mut output = ctx.run_ui(
             egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(50.0, 50.0))), ..Default::default() },
             |ui| {
@@ -190,10 +206,69 @@ mod tests {
     }
 
     #[test]
-    fn without_backdrop_blur_the_pill_glass_is_denser() {
-        // Swift's 0.45 GlassContainer tint plus glassSurface's 0.35 black: 0.6425 with real blur;
-        // at least 0.85 without it, so a sharp wallpaper doesn't show through.
-        assert_eq!(glass_alpha(true), (0.6425_f32 * 255.0).round() as u8);
-        assert!(glass_alpha(false) >= 216, "{}", glass_alpha(false));
+    fn the_lantern_keeps_its_tooltip_and_the_badge_explains_the_problem() {
+        // PillView.swift: `.help(count > 0 ? "\(count) new, waiting on you · Ask Lantern" : "Ask Lantern")`
+        // on the lantern, `.help(engineProblem)` on the "!" badge only.
+        let problem = || Some("Lantern's engine isn't running: gone".to_string());
+        assert_eq!(lantern_help(0, None, false), ("Ask Lantern".into(), false));
+        assert_eq!(lantern_help(3, None, true), ("3 new, waiting on you · Ask Lantern".into(), false));
+        assert_eq!(lantern_help(3, problem(), false), ("3 new, waiting on you · Ask Lantern".into(), false));
+        assert_eq!(lantern_help(3, problem(), true), (problem().unwrap(), true));
+    }
+
+    /// Points the pointer at `at` (two frames, as egui hovers what the last frame laid out) and
+    /// returns the pill's help text and anchor, and what a press and release there did.
+    fn pointer_at(model: &Model, at: Pos2) -> (Option<(String, Rect)>, Vec<UiAction>) {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let assets = Assets::load(&ctx);
+        let screen = Some(Rect::from_min_size(Pos2::ZERO, vec2(50.0, 50.0)));
+        let frame = |events: Vec<egui::Event>| {
+            let (mut input, mut out) = (PillInput::default(), Vec::new());
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: screen, events, ..Default::default() }, |ui| {
+                input = show(ui, model, &assets, false, &mut out);
+            });
+            output.textures_delta.clear();
+            (input.help.map(|(text, rect, _)| (text, rect)), out)
+        };
+        frame(vec![egui::Event::PointerMoved(at)]);
+        let (help, _) = frame(vec![egui::Event::PointerMoved(at)]);
+        let button =
+            |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        frame(vec![button(true)]);
+        let (_, out) = frame(vec![button(false)]);
+        (help, out)
+    }
+
+    #[test]
+    fn the_problem_badge_has_its_own_tooltip_and_clicks_reach_the_lantern() {
+        let lantern = Rect::from_min_size(pos2(PAD, PAD), vec2(LANTERN, LANTERN));
+        let badge = problem_badge(lantern);
+        let mut model = Model { engine: EngineHealth::Failed("gone".into()), ..Default::default() };
+        let problem = "Lantern's engine isn't running: gone".to_string();
+        // The badge's sliver outside the lantern, and its part over the lantern.
+        for at in [badge.right_top() + vec2(-1.0, 1.0), lantern.right_top() + vec2(-3.0, 3.0)] {
+            assert!(badge.contains(at));
+            let (help, _) = pointer_at(&model, at);
+            assert_eq!(help, Some((problem.clone(), badge)), "{at:?}");
+        }
+        assert!(!lantern.contains(badge.right_top() + vec2(-1.0, 1.0)));
+        let (help, out) = pointer_at(&model, lantern.center());
+        assert_eq!(help, Some(("Ask Lantern".to_string(), lantern)));
+        assert!(matches!(out.as_slice(), [UiAction::TogglePanel(PanelMode::Assistant)]));
+        let (_, out) = pointer_at(&model, lantern.right_top() + vec2(-3.0, 3.0));
+        assert!(matches!(out.as_slice(), [UiAction::TogglePanel(PanelMode::Assistant)]), "a click on the badge opens Ask Lantern");
+        // Without a problem the badge isn't there.
+        model.engine = EngineHealth::Ready;
+        let (help, _) = pointer_at(&model, lantern.right_top() + vec2(-3.0, 3.0));
+        assert_eq!(help, Some(("Ask Lantern".to_string(), lantern)));
+    }
+
+    #[test]
+    fn only_dense_glass_is_denser_than_the_macs() {
+        // Swift's 0.45 GlassContainer tint plus glassSurface's 0.35 black: 0.6425, as on the Mac
+        // (Windows too); at least 0.85 on GNOME, so a sharp wallpaper doesn't show through.
+        assert_eq!(glass_alpha(false), (0.6425_f32 * 255.0).round() as u8);
+        assert!(glass_alpha(true) >= 216, "{}", glass_alpha(true));
     }
 }

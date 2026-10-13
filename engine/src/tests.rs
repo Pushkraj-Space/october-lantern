@@ -1099,6 +1099,42 @@ fn launch_guidance_fits_each_platform() {
     }
 }
 
+/// The apps show your first message without Lantern's notes by cutting at the first of these
+/// (the Mac's `Bubble.withoutLanternNotes` in ChatView.swift, `without_lantern_notes` in
+/// desktop/src/ui/chat.rs). The Mac app only knows "What this Mac already has", so the heading
+/// keeps "Mac" there; Windows/Linux strip both headings.
+#[test]
+fn chats_hide_everything_lantern_adds_to_the_first_message() {
+    use crate::launch::{Extras, first_message_for, guidance_for};
+    const MAC: [&str; 4] = [
+        "\n\nYou're connected to October Bus",
+        "\n\n(Started from October Lantern",
+        "\n\nFor context, a screenshot of my screen",
+        "\n\nWhat this Mac already has",
+    ];
+    const DESKTOP: [&str; 5] = [
+        "\n\nYou're connected to October Bus",
+        "\n\n(Started from October Lantern",
+        "\n\nFor context, a screenshot of my screen",
+        "\n\nWhat this Mac already has",
+        "\n\nWhat this computer already has",
+    ];
+    let shown = |m: &str, markers: &[&str]| m[..markers.iter().filter_map(|k| m.find(k)).min().unwrap_or(m.len())].to_string();
+    let note = crate::bus::note("Claude · web");
+    let shot = std::path::Path::new("/tmp/s1.png");
+    for (os, markers) in [("macos", &MAC[..]), ("linux", &DESKTOP[..]), ("windows", &DESKTOP[..])] {
+        for extras in [
+            Extras { toolkit: Some("- Media: ffmpeg"), ..Default::default() },
+            Extras { toolkit: Some("- Media: ffmpeg"), screenshot: Some(shot), bus_note: Some(&note), ..Default::default() },
+        ] {
+            let first = first_message_for(os, Some("normalize the voice"), extras).unwrap();
+            let sent = guidance_for(os, first, std::path::Path::new("/p"));
+            assert!(sent.contains("ffmpeg"), "{sent}");
+            assert_eq!(shown(&sent, markers), "normalize the voice", "{os}: {sent}");
+        }
+    }
+}
+
 #[test]
 fn muse_sessions_give_state_question_and_history() {
     use crate::readers::muse;

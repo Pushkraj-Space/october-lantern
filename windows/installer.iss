@@ -1,7 +1,7 @@
 ; October Lantern for Windows: a per-user install (no administrator rights), with a Start menu
 ; shortcut, optional start at sign-in, and an uninstaller that removes Lantern's agent hooks.
 ; Built by scripts/package-windows.ps1 from build\windows:
-;   ISCC /DAppVersion=0.4.2 /DArch=x86_64 windows\installer.iss
+;   ISCC /DAppVersion=0.5.1 /DArch=x86_64 windows\installer.iss
 ;
 ; Running agent sessions, their windows and the October Bus run from Lantern's own copies in
 ; %LOCALAPPDATA%\October Lantern\bin, so installing over an older version doesn't stop them.
