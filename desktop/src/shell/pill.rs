@@ -47,10 +47,11 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
     if response.clicked() {
         out.push(UiAction::TogglePanel(PanelMode::Assistant));
     }
-    let tooltip = match (model.badge(), problem_text(&model.engine)) {
-        (_, Some(problem)) => problem,
-        (0, None) => "Ask Lantern".to_string(),
-        (n, None) => format!("Ask Lantern · {n} new, waiting on you"),
+    // PillView.swift: the lantern's help leads with what's waiting; engine trouble is the "!"
+    // badge's own help.
+    let tooltip = match model.badge() {
+        0 => "Ask Lantern".to_string(),
+        n => format!("{n} new, waiting on you · Ask Lantern"),
     };
     let measure = |text: &str| painter.layout_no_wrap(text.to_string(), help_font(), Color32::WHITE).size();
     let mut input = PillInput {
@@ -61,7 +62,12 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
         menu_at: response.secondary_clicked().then(|| response.interact_pointer_pos()).flatten(),
     };
     if response.hovered() && !response.dragged() {
-        input.help = Some((tooltip.clone(), lantern, measure(&tooltip)));
+        let badge = problem_badge(lantern);
+        let on_badge = response.hover_pos().is_some_and(|pos| badge.expand(1.0).contains(pos));
+        input.help = match problem_text(&model.engine) {
+            Some(problem) if on_badge => Some((problem.clone(), badge, measure(&problem))),
+            _ => Some((tooltip.clone(), lantern, measure(&tooltip))),
+        };
     }
 
     if expanded {
@@ -69,10 +75,11 @@ pub fn show(ui: &mut egui::Ui, model: &Model, assets: &Assets, expanded: bool, o
         painter.hline(rect.center().x - 11.0..=rect.center().x + 11.0, y + 0.5, Stroke::new(1.0, theme::STROKE));
         y += 1.0 + 2.0 + 6.0;
         let panel = model.panel;
+        // PillView.swift's order: Your agents, New session, Ask Lantern, Point & Ask.
         for (icon, help, active) in [
-            (Icon::Sparkles, "Ask Lantern", panel == Some(PanelMode::Assistant)),
             (Icon::Layers, "Your agents", panel.is_some_and(PanelMode::is_list)),
             (Icon::Plus, "New session, or a task for the app you're in", panel == Some(PanelMode::NewSession)),
+            (Icon::Sparkles, "Ask Lantern: ask anything, or tell it what to do", panel == Some(PanelMode::Assistant)),
             (Icon::PointAsk, "Point & Ask: select part of the screen and ask about it", false),
         ] {
             let slot = Rect::from_min_size(pos2(rect.center().x - ICON / 2.0, y), vec2(ICON, ICON));
@@ -112,6 +119,11 @@ fn problem_text(engine: &EngineHealth) -> Option<String> {
     }
 }
 
+/// Where the engine-problem badge sits: the lantern's top right.
+fn problem_badge(lantern: Rect) -> Rect {
+    Rect::from_center_size(lantern.right_top() + vec2(-5.0, 5.0), vec2(14.0, 14.0))
+}
+
 /// An exclamation badge at the lantern's top right while the engine isn't running normally.
 fn engine_problem(painter: &egui::Painter, lantern: Rect, engine: &EngineHealth) {
     let color = match engine {
@@ -119,7 +131,7 @@ fn engine_problem(painter: &egui::Painter, lantern: Rect, engine: &EngineHealth)
         EngineHealth::Failed(_) => theme::RED,
         _ => return,
     };
-    let badge = Rect::from_center_size(lantern.right_top() + vec2(-5.0, 5.0), vec2(14.0, 14.0));
+    let badge = problem_badge(lantern);
     painter.circle_filled(badge.center(), 7.0, color);
     paint_icon(painter, badge.shrink(3.0), Icon::Exclamation, theme::black(0.85));
 }
@@ -187,6 +199,51 @@ mod tests {
             _ => None,
         });
         first.expect("the pill paints its glass first")
+    }
+
+    /// The help shown with the pointer at `pos` (two frames, so hover settles).
+    fn help_at(model: &Model, expanded: bool, pos: Pos2) -> Option<String> {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let assets = Assets::load(&ctx);
+        let size = if expanded { vec2(50.0, 213.0) } else { vec2(50.0, 50.0) };
+        let mut help = None;
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+                events: vec![egui::Event::PointerMoved(pos)],
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| help = show(ui, model, &assets, expanded, &mut Vec::new()).help.map(|(text, ..)| text));
+            output.textures_delta.clear();
+        }
+        help
+    }
+
+    #[test]
+    fn tooltips_follow_the_mac_pill() {
+        let mut model = Model::default();
+        let lantern = pos2(PAD + LANTERN / 2.0, PAD + LANTERN / 2.0);
+        assert_eq!(help_at(&model, false, lantern).as_deref(), Some("Ask Lantern"));
+        model.inbox.new = vec!["a".into(), "b".into()];
+        assert_eq!(help_at(&model, false, lantern).as_deref(), Some("2 new, waiting on you · Ask Lantern"));
+        // Engine trouble is the "!" badge's help, not the lantern's.
+        model.engine = EngineHealth::Restarting;
+        assert_eq!(help_at(&model, false, lantern).as_deref(), Some("2 new, waiting on you · Ask Lantern"));
+        let badge = problem_badge(Rect::from_min_size(pos2(PAD, PAD), vec2(LANTERN, LANTERN))).center();
+        assert_eq!(help_at(&model, false, badge), problem_text(&model.engine));
+        // Expanded, top to bottom: Your agents, New session, Ask Lantern, Point & Ask.
+        let first = PAD + LANTERN + 8.0 + 9.0 + ICON / 2.0;
+        let helps: Vec<_> = (0..4).map(|i| help_at(&model, true, pos2(25.0, first + i as f32 * (ICON + 6.0))).unwrap()).collect();
+        assert_eq!(
+            helps,
+            [
+                "Your agents",
+                "New session, or a task for the app you're in",
+                "Ask Lantern: ask anything, or tell it what to do",
+                "Point & Ask: select part of the screen and ask about it"
+            ]
+        );
     }
 
     #[test]
