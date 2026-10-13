@@ -55,6 +55,7 @@ pub struct Transcripts {
     claude_index: HashMap<String, PathBuf>,
     codex_index: HashMap<String, PathBuf>,
     codex_open: HashMap<u32, (Instant, Option<PathBuf>)>,
+    muse_open: HashMap<u32, (Instant, Option<PathBuf>)>,
 }
 
 impl Transcripts {
@@ -160,8 +161,23 @@ impl Transcripts {
         self.cached(path, parse_codex)
     }
 
+    // ---------- Muse ----------
+
+    /// The session a Muse process has open (its lock), cached briefly like Codex's.
+    pub fn muse_path_for_pid(&mut self, pid: u32) -> Option<PathBuf> {
+        if let Some((at, path)) = self.muse_open.get(&pid)
+            && at.elapsed() < Duration::from_secs(15)
+        {
+            return path.clone();
+        }
+        let path = crate::readers::muse::open_session(pid);
+        self.muse_open.insert(pid, (Instant::now(), path.clone()));
+        path
+    }
+
     pub fn forget_pids(&mut self, live: &[u32]) {
         self.codex_open.retain(|pid, _| live.contains(pid));
+        self.muse_open.retain(|pid, _| live.contains(pid));
     }
 }
 

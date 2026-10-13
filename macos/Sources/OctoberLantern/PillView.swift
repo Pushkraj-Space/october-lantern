@@ -35,6 +35,9 @@ struct PillView: View {
                 Divider()
                 Button("October…") { model.panel = .october }
                 Button("Settings…") { onMenu() }
+                Divider()
+                // Also in the menu bar icon's menu, which a full menu bar can hide.
+                Button("Quit October Lantern") { NSApp.terminate(nil) }
             }
             .overlay(alignment: .topTrailing) {
                 if let engineProblem {
@@ -51,15 +54,15 @@ struct PillView: View {
             if expanded {
                 VStack(spacing: 6) {
                     Rectangle().fill(Theme.stroke).frame(width: 22, height: 1).padding(.bottom, 2)
-                    PillIcon(symbol: "sparkles", tint: model.panel == .assistant ? Theme.amber : nil,
-                             active: model.panel == .assistant, help: "Ask Lantern: ask anything, or tell it what to do") {
-                        model.toggle(.assistant)
-                    }
                     PillIcon(symbol: "square.stack.3d.up", active: model.panel?.isList == true, help: "Your agents") {
                         model.toggle(.inbox)
                     }
                     PillIcon(symbol: "plus", active: model.panel == .newSession, help: "New session, or a task for the app you're in") {
                         model.startNew()
+                    }
+                    PillIcon(symbol: "sparkles", tint: model.panel == .assistant ? Theme.amber : nil,
+                             active: model.panel == .assistant, help: "Ask Lantern: ask anything, or tell it what to do") {
+                        model.toggle(.assistant)
                     }
                     PillIcon(symbol: "cursorarrow.and.square.on.square.dashed",
                              help: "Point & Ask: select part of the screen and ask about it") {

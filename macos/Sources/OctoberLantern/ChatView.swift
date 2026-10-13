@@ -142,7 +142,8 @@ struct Bubble: View {
     /// full-path note, the screenshot path, the toolkit list): the agent still gets all of it.
     static func withoutLanternNotes(_ text: String) -> String {
         let markers = ["\n\nYou're connected to October Bus", "\n\n(Started from October Lantern",
-                       "\n\nFor context, a screenshot of my screen", "\n\nWhat this Mac already has"]
+                       "\n\nFor context, a screenshot of my screen", "\n\nWhat this Mac already has",
+                       "\n\nWhat this computer already has"]
         let cut = markers.compactMap { text.range(of: $0)?.lowerBound }.min()
         return cut.map { String(text[..<$0]) } ?? text
     }

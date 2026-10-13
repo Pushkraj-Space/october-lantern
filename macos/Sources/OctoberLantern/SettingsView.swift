@@ -149,7 +149,7 @@ struct SettingsView: View {
 
     private var allKinds: [AgentKind] {
         ["claude", "codex", "opencode", "pi", "october", "gemini", "grok", "cursor", "qwen", "goose", "aider", "amp",
-         "copilot", "kimi", "droid", "crush", "auggie"].map { AgentKind(rawValue: $0) }
+         "copilot", "kimi", "droid", "crush", "auggie", "muse"].map { AgentKind(rawValue: $0) }
     }
 
     private var about: some View {

@@ -227,11 +227,12 @@ fn note(ui: &mut Ui, body: &str) {
 }
 
 pub fn without_lantern_notes(source: &str) -> &str {
-    const MARKERS: [&str; 4] = [
+    const MARKERS: [&str; 5] = [
         "\n\nYou're connected to October Bus",
         "\n\n(Started from October Lantern",
         "\n\nFor context, a screenshot of my screen",
         "\n\nWhat this Mac already has",
+        "\n\nWhat this computer already has",
     ];
     &source[..MARKERS.iter().filter_map(|marker| source.find(marker)).min().unwrap_or(source.len())]
 }
