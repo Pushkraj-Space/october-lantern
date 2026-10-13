@@ -151,7 +151,8 @@ struct NewSessionView: View {
             let all = ordered(installed)
             let shown = Array(all.prefix(5))
             let rest = Array(all.dropFirst(5))
-            let others = AgentKind.supported.filter { !installed.contains($0) }
+            // Agents not installed that can be downloaded (Muse is Meta-internal: nowhere to send you).
+            let others = AgentKind.supported.filter { !installed.contains($0) && $0.website != nil }
             HStack(spacing: 6) {
                 if installed.isEmpty {
                     Text("No agents found on this Mac yet.").font(.system(size: 12)).foregroundStyle(Theme.muted)

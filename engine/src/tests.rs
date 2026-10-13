@@ -68,6 +68,8 @@ fn classifies_agents_and_skips_helpers() {
     assert_eq!(scanner::classify(&proc(&["/opt/homebrew/bin/opencode"])), Some(Kind::Opencode));
     assert_eq!(scanner::classify(&proc(&["node", "/usr/local/bin/pi"])), Some(Kind::Pi));
     assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/cursor-agent"])), Some(Kind::Cursor));
+    assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/muse-bin-1.4.6-R6000.1"])), Some(Kind::Muse));
+    assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/muse-bin-1.4.6-R6000.1", "exec", "hi"])), None);
     // Helpers and headless runs aren't agents you can answer.
     assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/claude", "daemon", "run"])), None);
     assert_eq!(scanner::classify(&proc(&["/Users/x/.local/bin/claude", "-p", "hi"])), None);
@@ -1095,4 +1097,64 @@ fn launch_guidance_fits_each_platform() {
     for note in [mac, linux, windows] {
         assert!(note.starts_with("hi\n\n(Started from October Lantern"));
     }
+}
+
+#[test]
+fn muse_sessions_give_state_question_and_history() {
+    use crate::readers::muse;
+    let dir = std::env::temp_dir().join(format!("lantern-muse-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("session.jsonl");
+    let ev = |seq: u64, kind: &str, event: serde_json::Value| {
+        serde_json::json!({"stream": {"kind": "session", "id": "s1"}, "sequence": seq, "recorded_at": 1_791_834_142_000_000u64 + seq,
+            "record_type": "event", "payload_type": "runtime.session", "payload": {"kind": kind, "event": event}})
+        .to_string()
+    };
+    let mut log = vec![
+        ev(1, "run", serde_json::json!({"kind": "started", "prompt": "check PR 215\nplease"})),
+        ev(
+            2,
+            "run",
+            serde_json::json!({"kind": "assistant_tool_calls_committed", "tool_calls": [{"name": "bash", "args": "{\"command\":\"gh pr view 215\",\"description\":\"View PR 215\"}"}]}),
+        ),
+        ev(
+            3,
+            "approval",
+            serde_json::json!({"kind": "requested", "pending_action_id": "a1", "tool_name": "network", "raw_args": "https api.github.com:443"}),
+        ),
+        ev(4, "approval", serde_json::json!({"kind": "automated_review_started", "pending_action_id": "a1"})),
+    ];
+    let write = |log: &[String]| std::fs::write(&path, log.join("\n") + "\n").unwrap();
+    write(&log);
+    // A model is reviewing the request: still working.
+    let s = muse::parse(&path, 0);
+    assert_eq!((s.state, s.title.as_deref(), s.session_id.as_deref()), (Some(State::Working), Some("check PR 215"), Some("s1")));
+    log.push(ev(
+        5,
+        "approval",
+        serde_json::json!({"kind": "automated_review_completed", "pending_action_id": "a1", "status": "needs_user"}),
+    ));
+    write(&log);
+    let s = muse::parse(&path, 0);
+    assert_eq!(s.state, Some(State::NeedsInput));
+    assert_eq!(s.question.as_deref(), Some("Allow network: https api.github.com:443?"));
+    log.push(ev(6, "approval", serde_json::json!({"kind": "decision_applied", "pending_action_id": "a1", "decision": "approved"})));
+    log.push(ev(7, "run", serde_json::json!({"kind": "assistant_message_committed", "text": "PR 215 adds chat mode."})));
+    log.push(ev(8, "run", serde_json::json!({"kind": "terminal", "terminal": "completed"})));
+    write(&log);
+    let s = muse::parse(&path, 0);
+    assert_eq!(
+        (s.state, s.last_message.as_deref(), s.since),
+        (Some(State::Waiting), Some("PR 215 adds chat mode."), Some(1_791_834_142_000))
+    );
+    let h = muse::history(&path);
+    let roles: Vec<_> = h.iter().map(|m| (format!("{:?}", m.role), m.text.as_str())).collect();
+    assert_eq!(
+        roles,
+        [("User".into(), "check PR 215\nplease"), ("Tool".into(), "bash · View PR 215"), ("Agent".into(), "PR 215 adds chat mode.")]
+    );
+    let root = std::path::Path::new("/h/.local/share/muse/sessions");
+    assert!(muse::is_main_lock(root, &root.join("2026/10/12/s1/.session.lock")));
+    assert!(!muse::is_main_lock(root, &root.join("2026/10/12/s1/subagent/x/.session.lock")));
+    std::fs::remove_dir_all(&dir).unwrap();
 }

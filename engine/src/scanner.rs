@@ -473,6 +473,7 @@ impl Scanner {
                     .or_else(|| self.children.get(&agent.pid).copied().and_then(|c| self.transcripts.codex_path_for_pid(c)))
                     .or_else(|| self.codex_paths.get(&agent.pid).map(|(p, _)| p.clone()))
                     .map(|p| (Kind::Codex, p)),
+                Kind::Muse => self.transcripts.muse_path_for_pid(agent.pid).map(|p| (Kind::Muse, p)),
                 Kind::Pi | Kind::October | Kind::Gemini => {
                     let (cwd, start) = self.started.get(&agent.pid)?;
                     let path = if agent.kind == Kind::Gemini {
@@ -513,6 +514,7 @@ impl Scanner {
             Kind::Codex => crate::history::codex(&path),
             Kind::Pi | Kind::October => crate::readers::pi::history(&path),
             Kind::Gemini => crate::readers::gemini::history(&path),
+            Kind::Muse => crate::readers::muse::history(&path),
             _ => crate::history::claude(&path),
         };
         self.remember_history(&agent.id, stamp, &messages);
@@ -611,6 +613,10 @@ impl Scanner {
                 self.codex_paths.insert(p.pid, (path.clone(), exact));
                 found(self.transcripts.codex_status(&path), if exact { SessionMatch::Exact } else { SessionMatch::Guessed })
             }
+            Kind::Muse => match self.transcripts.muse_path_for_pid(p.pid) {
+                Some(path) => found(self.transcripts.cached(&path, crate::readers::muse::parse), SessionMatch::Exact),
+                None => (None, SessionMatch::None),
+            },
             // No session file since the process started means nothing has happened yet.
             Kind::Pi | Kind::October => {
                 let Some(cwd) = p.cwd.as_deref() else { return (None, SessionMatch::None) };

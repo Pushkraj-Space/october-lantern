@@ -1,4 +1,4 @@
-//! Session readers for OpenCode, Pi (and the October harness, a Pi fork) and Gemini CLI.
+//! Session readers for OpenCode, Pi (and the October harness, a Pi fork), Gemini CLI and Muse.
 //! Like the Claude Code and Codex readers, these only read the agents' own files.
 //!
 //! None of these three keeps its session file open, so a running process is matched to its
@@ -397,6 +397,131 @@ pub mod gemini {
                     }
                 }
                 Some("error") => push(&mut out, Role::Agent, &content_text(&m), at),
+                _ => {}
+            }
+        }
+        keep_recent(out)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Muse (Meta): an event log per session, `~/.local/share/muse/sessions/YYYY/MM/DD/<id>/session.jsonl`.
+// The running process holds the session's `.session.lock` open, so it's matched exactly.
+
+pub mod muse {
+    use super::*;
+
+    fn root() -> PathBuf {
+        home().join(".local/share/muse/sessions")
+    }
+
+    /// The main session (not a subagent's) whose lock the process holds.
+    pub fn open_session(pid: u32) -> Option<PathBuf> {
+        let root = root();
+        crate::platform::open_files(pid).into_iter().find(|p| is_main_lock(&root, p)).map(|p| p.with_file_name("session.jsonl"))
+    }
+
+    /// `<root>/YYYY/MM/DD/<id>/.session.lock`; a subagent's lock is deeper.
+    pub(crate) fn is_main_lock(root: &Path, path: &Path) -> bool {
+        path.file_name().is_some_and(|n| n == ".session.lock") && path.strip_prefix(root).is_ok_and(|rel| rel.components().count() == 5)
+    }
+
+    /// Events are recorded in microseconds.
+    fn at_ms(e: &Value) -> Option<u64> {
+        e["recorded_at"].as_u64().map(|us| us / 1000)
+    }
+
+    /// The session's own event (`runtime.session`): its kind (`run`, `approval`, …) and the event.
+    fn event(e: &Value) -> Option<(&str, &Value)> {
+        (e["payload_type"] == "runtime.session").then(|| (e["payload"]["kind"].as_str().unwrap_or(""), &e["payload"]["event"]))
+    }
+
+    /// A run (one turn) starts with your prompt and ends with `terminal`. A tool waiting for your
+    /// approval is an `approval` `requested` with no `decision_applied` yet; Muse may first have
+    /// a model review it, so it only counts as waiting on you once that review didn't approve it.
+    pub fn parse(path: &Path, mtime: u64) -> SessionStatus {
+        let mut status = SessionStatus { since: Some(mtime), ..Default::default() };
+        // The title is the first prompt, near the start of the file.
+        if let Some(head) = read_range(path, false, 256 * 1024) {
+            status.title = lines(&head)
+                .filter_map(|e| {
+                    event(&e)
+                        .filter(|(k, ev)| *k == "run" && ev["kind"] == "started")
+                        .and_then(|(_, ev)| ev["prompt"].as_str().map(String::from))
+                })
+                .next()
+                .map(|p| truncate(p.lines().next().unwrap_or(&p), 80));
+        }
+        let Some(text) = read_range(path, true, TAIL_BYTES) else { return status };
+        let mut state = State::Idle;
+        let mut reply: Option<String> = None;
+        // Pending approvals: id → (question, under automated review).
+        let mut pending: Vec<(String, String, bool)> = Vec::new();
+        for e in lines(&text) {
+            if e["stream"]["kind"] == "session" && status.session_id.is_none() {
+                status.session_id = e["stream"]["id"].as_str().map(String::from);
+            }
+            let Some((kind, ev)) = event(&e) else { continue };
+            let id = ev["pending_action_id"].as_str().unwrap_or("").to_string();
+            match (kind, ev["kind"].as_str().unwrap_or("")) {
+                ("run", "started") => {
+                    state = State::Working;
+                    reply = None;
+                    status.since = at_ms(&e).or(status.since);
+                    if status.title.is_none()
+                        && let Some(p) = ev["prompt"].as_str()
+                    {
+                        status.title = Some(truncate(p.lines().next().unwrap_or(p), 80));
+                    }
+                }
+                ("run", "assistant_message_committed") => reply = ev["text"].as_str().map(String::from),
+                ("run", "terminal") => {
+                    state = State::Waiting;
+                    pending.clear();
+                    status.since = at_ms(&e).or(status.since);
+                }
+                ("approval", "requested") => {
+                    let tool = ev["tool_name"].as_str().unwrap_or("a tool");
+                    let args = ev["raw_args"].as_str().unwrap_or("");
+                    let q = if args.is_empty() { format!("Allow {tool}?") } else { format!("Allow {tool}: {}?", truncate(args, 200)) };
+                    pending.push((id, q, false));
+                }
+                ("approval", "automated_review_started") => pending.iter_mut().filter(|p| p.0 == id).for_each(|p| p.2 = true),
+                ("approval", "automated_review_completed") if ev["status"] != "approved" => {
+                    pending.iter_mut().filter(|p| p.0 == id).for_each(|p| p.2 = false)
+                }
+                ("approval", "decision_applied") => pending.retain(|p| p.0 != id),
+                _ => {}
+            }
+        }
+        if let Some((_, question, _)) = pending.iter().find(|p| !p.2) {
+            state = State::NeedsInput;
+            status.question = Some(question.clone());
+            // Muse's approval keys aren't Claude Code's: answer it in its terminal.
+            status.question_kind = Some(crate::model::QuestionKind::Other);
+        }
+        if state == State::Waiting {
+            status.last_message = reply.map(|t| truncate(&t, MESSAGE_CHARS));
+        }
+        status.state = Some(state);
+        status
+    }
+
+    pub fn history(path: &Path) -> Vec<ChatMessage> {
+        let Some(text) = read_range(path, true, crate::history::TAIL_BYTES) else { return Vec::new() };
+        let mut out = Vec::new();
+        for e in lines(&text) {
+            let Some(("run", ev)) = event(&e) else { continue };
+            let at = at_ms(&e).map(crate::model::iso);
+            let at = at.as_deref();
+            match ev["kind"].as_str() {
+                Some("started") => push(&mut out, Role::User, ev["prompt"].as_str().unwrap_or(""), at),
+                Some("assistant_message_committed") => push(&mut out, Role::Agent, ev["text"].as_str().unwrap_or(""), at),
+                Some("assistant_tool_calls_committed") => {
+                    for call in ev["tool_calls"].as_array().into_iter().flatten() {
+                        push(&mut out, Role::Tool, &describe_tool(call["name"].as_str().unwrap_or("tool"), &call["args"]), at);
+                    }
+                }
                 _ => {}
             }
         }

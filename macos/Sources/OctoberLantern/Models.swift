@@ -21,7 +21,7 @@ struct AgentKind: RawRepresentable, Codable, Hashable {
     /// Every agent Lantern supports, in the order New Session lists them.
     static let supported: [AgentKind] = [
         "claude", "codex", "gemini", "opencode", "pi", "october", "grok", "cursor", "copilot", "qwen", "goose", "aider", "amp",
-        "kimi", "droid", "crush", "auggie",
+        "kimi", "droid", "crush", "auggie", "muse",
     ].map { AgentKind(rawValue: $0) }
 
     /// Where to get an agent that isn't installed.
@@ -42,7 +42,7 @@ struct AgentKind: RawRepresentable, Codable, Hashable {
             "claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "pi": "Pi", "gemini": "Gemini CLI",
             "grok": "Grok", "cursor": "Cursor", "qwen": "Qwen Code", "goose": "Goose", "aider": "Aider", "amp": "Amp",
             "copilot": "Copilot", "kimi": "Kimi", "droid": "Droid", "crush": "Crush", "auggie": "Auggie",
-            "october": "October",
+            "muse": "Muse", "october": "October",
         ][rawValue] ?? rawValue.capitalized
     }
 }

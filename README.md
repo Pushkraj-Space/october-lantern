@@ -67,7 +67,7 @@ Press **Control + Option + Space** whenever you want to write a reply, and **Con
 
 | Agents                                                                                               | What you can see                                                                                                               |
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Claude Code, Codex, [October Harness](https://harness.october.dev), OpenCode, Pi, Gemini CLI**     | Working / your-turn status, the last message, and conversation history.                                                        |
+| **Claude Code, Codex, [October Harness](https://harness.october.dev), OpenCode, Pi, Gemini CLI, Muse (Meta)** | Working / your-turn status, the last message, and conversation history.                                                        |
 | **Grok, Cursor Agent, Qwen Code, Goose, Aider, Amp, GitHub Copilot CLI, Kimi, Droid, Crush, Auggie** | Running sessions, with replies and navigation where the terminal supports them. Detailed status and chat aren't available yet. |
 
 Optional hooks add prompt completion updates for Codex and permission requests for Claude Code. When Lantern can't confidently match a conversation to a session, it says so.
