@@ -140,14 +140,16 @@ pub fn bubble(ui: &mut Ui, cx: &mut Ctx, message: &ChatMessage, key: &str) {
     if message.role == Role::Tool {
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), Sense::hover());
-            for x in [0.0, 4.0] {
-                ui.painter()
-                    .line_segment([rect.min + egui::vec2(x, 1.0), rect.min + egui::vec2(x + 4.0, 5.0)], Stroke::new(1.0, t::white(0.44)));
-                ui.painter()
-                    .line_segment([rect.min + egui::vec2(x + 4.0, 5.0), rect.min + egui::vec2(x, 9.0)], Stroke::new(1.0, t::white(0.44)));
+            ui.spacing_mut().item_spacing.x = 6.0;
+            // SF Mono 11 advances ~6.9pt a glyph; JetBrains Mono needs 11.5 for the same line.
+            // `chevron.right.2` at 8pt bold: two heavy chevrons, 3.5pt apart.
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 10.0), Sense::hover());
+            let stroke = Stroke::new(1.5, t::white(0.44));
+            for x in [0.75, 4.25] {
+                ui.painter().line_segment([rect.min + egui::vec2(x, 2.0), rect.min + egui::vec2(x + 3.0, 5.0)], stroke);
+                ui.painter().line_segment([rect.min + egui::vec2(x + 3.0, 5.0), rect.min + egui::vec2(x, 8.0)], stroke);
             }
-            ui.add(egui::Label::new(c::text(&message.text, 11.0, Weight::Mono, t::white(0.44))).truncate()).on_hover_text(&message.text);
+            ui.add(egui::Label::new(c::text(&message.text, 11.5, Weight::Mono, t::white(0.44))).truncate()).on_hover_text(&message.text);
         });
         return;
     }
