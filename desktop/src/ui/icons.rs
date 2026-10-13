@@ -41,9 +41,6 @@ pub enum Icon {
     Wifi,
     Video,
     Photo,
-    Settings,
-    Leaf,
-    Info,
     AccountCircle,
     Mail,
     Play,
@@ -311,27 +308,6 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.rect((2.0, 3.0), (22.0, 21.0), 2.0, false);
             p.circle(8.0, 8.0, 2.0, false);
             p.line(&[(3.0, 18.0), (10.0, 11.0), (15.0, 16.0), (18.0, 13.0), (22.0, 17.0)]);
-        }
-        Settings => {
-            p.circle(12.0, 12.0, 4.0, false);
-            let pts = (0..24)
-                .map(|i| {
-                    let a = i as f32 * std::f32::consts::TAU / 24.0;
-                    let r = if i % 3 == 0 { 11.0 } else { 8.5 };
-                    (12.0 + a.cos() * r, 12.0 + a.sin() * r)
-                })
-                .collect::<Vec<_>>();
-            p.closed(&pts, false);
-        }
-        Leaf => {
-            p.line(&[(4.0, 21.0), (18.0, 7.0)]);
-            p.closed(&[(5.0, 18.0), (3.0, 12.0), (6.0, 6.0), (14.0, 4.0), (22.0, 2.0), (20.0, 12.0), (16.0, 18.0), (10.0, 20.0)], false);
-        }
-        Info => {
-            p.circle(12.0, 12.0, 10.0, false);
-            p.circle(12.0, 6.5, 1.0, true);
-            p.line(&[(10.0, 11.0), (12.0, 11.0), (12.0, 18.0)]);
-            p.line(&[(9.0, 18.0), (15.0, 18.0)]);
         }
         AccountCircle => {
             p.circle(12.0, 12.0, 10.0, false);
