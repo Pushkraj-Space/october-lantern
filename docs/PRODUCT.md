@@ -68,7 +68,7 @@ Lantern does **not** replace your terminals. Your agents keep running exactly wh
 - **Amber glow with a number:** that many agents have finished or are asking you something since you last looked.
 - **Amber glow, no number:** agents are still waiting, but you've already seen them.
 
-**Clicking the lantern** opens **Ask Lantern**: ask anything or tell it what to do (clicking it again closes the panel). The stack button opens your agents' cards (Waiting, then all agents). Right-click the lantern for everything else: Ask Lantern, Your Agents, New Session, Point & Ask, Dictate, October, Settings, Quit (also in the menu bar icon, which a full menu bar can hide).
+**Clicking the lantern** opens **Ask Lantern**: ask anything or tell it what to do (clicking it again closes the panel). Hovering shows four buttons, top to bottom: your agents' cards (Waiting, then all agents), New session, Ask Lantern (sparkles) and Point & Ask. Right-click the lantern for everything else: Ask Lantern, Your Agents, New Session, Point & Ask, Dictate, October, Settings, Quit (also in the menu bar icon, which a full menu bar can hide).
 
 **Expanded.** Hover over the lantern and it grows downward into a glass capsule with three buttons: **Your agents**, **New session (+)** and **Point & Ask**. It tucks back in when the mouse leaves. Drag the lantern to move it; it snaps to the nearest screen edge.
 
