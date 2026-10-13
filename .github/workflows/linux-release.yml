@@ -1,23 +1,19 @@
 name: Linux release bundle
 
+# Builds and checks the Linux release and uploads it as this run's artifact. Publishing is done
+# from a maintainer's machine with scripts/publish-desktop.sh, next to the Mac release.
 on:
   workflow_dispatch:
-    inputs:
-      publish:
-        description: Publish the verified Linux bundle to this repository's release
-        type: boolean
-        default: false
-  push:
-    tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   bundle:
     runs-on: ubuntu-latest
     env:
-      LANTERN_RELEASES_REPO: ${{ github.repository }}
+      # Where the in-app updater looks for new versions: the public releases repository.
+      LANTERN_RELEASES_REPO: ${{ vars.LANTERN_RELEASES_REPO || 'harshsaver/october-lantern-releases' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -37,24 +33,19 @@ jobs:
       - run: scripts/build-bus-linux.sh
       - run: python3 scripts/smoke-linux.py --bus
       - run: scripts/package-linux.sh
+      - name: Release info
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, tomllib, os
+          version = tomllib.load(open("engine/Cargo.toml", "rb"))["package"]["version"]
+          commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          info = {"version": version, "commit": commit, "releases": os.environ["LANTERN_RELEASES_REPO"], "signed": False}
+          json.dump(info, open("build/release-info.json", "w"))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: October-Lantern-linux-x86_64
           path: |
             build/October-Lantern-linux-x86_64.tar.gz
             build/October-Lantern-linux-x86_64.tar.gz.sha256
-      - name: Publish when explicitly requested
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag="v$(python3 -c 'import tomllib; print(tomllib.load(open("engine/Cargo.toml", "rb"))["package"]["version"])')"
-          notes="$(mktemp)"
-          cat > "$notes" <<'NOTES'
-          Native Linux Lantern: Rust desktop and engine sidecar, bundled October Bus,
-          screenshots and shortcuts through desktop portals, local dictation support,
-          and October account/phone controls. See the README for setup and verification limits.
-          NOTES
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "October Lantern $tag" --notes-file "$notes"
-          gh release upload "$tag" build/October-Lantern-linux-x86_64.tar.gz build/October-Lantern-linux-x86_64.tar.gz.sha256
-          rm -f "$notes"
+            build/release-info.json

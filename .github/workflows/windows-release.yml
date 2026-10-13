@@ -1,23 +1,20 @@
 name: Windows release bundle
 
+# Builds, signs (when Azure Artifact Signing or a .pfx is configured) and checks the Windows
+# release, and uploads it as this run's artifact. Publishing is done from a maintainer's machine
+# with scripts/publish-windows.sh, next to the Mac release.
 on:
   workflow_dispatch:
-    inputs:
-      publish:
-        description: Publish the verified Windows zip to this repository's release
-        type: boolean
-        default: false
-  push:
-    tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   bundle:
     runs-on: windows-latest
     env:
-      LANTERN_RELEASES_REPO: ${{ github.repository }}
+      # Where the in-app updater looks for new versions: the public releases repository.
+      LANTERN_RELEASES_REPO: ${{ vars.LANTERN_RELEASES_REPO || 'harshsaver/october-lantern-releases' }}
       CARGO_TARGET_DIR: ${{ github.workspace }}\build\target
     steps:
       - uses: actions/checkout@v4
@@ -38,8 +35,14 @@ jobs:
       - run: python scripts/smoke-windows.py --bus
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
-      - name: Package (signed when a certificate is configured)
+      - name: Package and sign
         env:
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: pwsh -File scripts/package-windows.ps1
@@ -51,21 +54,4 @@ jobs:
             build/October-Lantern-windows-x86_64.zip.sha256
             build/October-Lantern-windows-x86_64-setup.exe
             build/October-Lantern-windows-x86_64-setup.exe.sha256
-      - name: Publish when explicitly requested
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag="v$(python -c 'import tomllib; print(tomllib.load(open("engine/Cargo.toml", "rb"))["package"]["version"])')"
-          notes="$(mktemp)"
-          cat > "$notes" <<'NOTES'
-          Windows preview: install with October-Lantern-windows-x86_64-setup.exe (no administrator
-          rights needed). Lantern finds agents in Windows Terminal, VS Code and console windows,
-          starts sessions you can reply to, and includes October Bus, screenshots, local dictation
-          (after scripts/setup-dictation.ps1) and in-app updates. See the README for details.
-          NOTES
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "October Lantern $tag" --notes-file "$notes"
-          gh release upload "$tag" build/October-Lantern-windows-x86_64.zip build/October-Lantern-windows-x86_64.zip.sha256 \
-            build/October-Lantern-windows-x86_64-setup.exe build/October-Lantern-windows-x86_64-setup.exe.sha256
-          rm -f "$notes"
+            build/release-info.json

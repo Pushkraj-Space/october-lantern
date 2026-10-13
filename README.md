@@ -226,11 +226,11 @@ installed, installs itself with its own checksum-verified Node.js.
 
 The app can check Linux updates daily when enabled, and install a checksum-verified
 native bundle on request. `scripts/package-linux.sh` creates the bundle and SHA-256
-file; the Linux release workflow builds them as CI artifacts. Its optional Publish
-input uploads them only when explicitly selected. A published Linux bundle is
-needed before the updater can offer it. This fork uses its own releases; set
-`LANTERN_RELEASES_REPO=owner/repo` at build time to choose another release source.
-It never uses Mac release assets. Database history is read directly with bundled
+file; the Linux release workflow builds them as CI artifacts, and
+`scripts/publish-desktop.sh` publishes them next to the Mac's DMG (see
+[docs/RELEASING.md](docs/RELEASING.md)). Updates come from
+`harshsaver/october-lantern-releases`; a fork can set `LANTERN_RELEASES_REPO=owner/repo`
+at build time to use its own. It never uses Mac release assets. Database history is read directly with bundled
 SQLite, so the app does not need a system `sqlite3` executable.
 
 #### Windows (preview)
@@ -259,9 +259,10 @@ pwsh scripts/package-windows.ps1
 
 The installer (`October-Lantern-windows-x86_64-setup.exe`) installs for the current user
 without administrator rights, adds a Start menu shortcut and optionally starts Lantern at
-sign-in; uninstalling also removes Lantern's agent hooks. Set `WINDOWS_CERTIFICATE`
-(a base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` to have `package-windows.ps1` sign the
-programs and the installer; the Windows release workflow reads them from repository secrets.
+sign-in; uninstalling also removes Lantern's agent hooks. `package-windows.ps1` signs the
+programs and the installer with Azure Artifact Signing or a `.pfx` certificate when one is
+configured; the Windows release workflow reads them from repository secrets (see
+[docs/RELEASING.md](docs/RELEASING.md)).
 
 What works: Lantern finds Claude Code, Codex and the other supported agents running
 in Windows Terminal, VS Code, Cursor, WezTerm and plain console windows, including

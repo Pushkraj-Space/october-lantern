@@ -35,3 +35,16 @@ if ($Iscc) {
 else {
     Write-Host 'Inno Setup not found; skipped the installer (the zip is complete on its own).'
 }
+
+# What scripts/publish-windows.sh checks before publishing: the version, the commit, where the
+# updater looks, and whether every program is signed.
+$Programs = @($Files | Where-Object { $_ -like '*.exe' } | ForEach-Object { Join-Path $Dest $_ })
+if ($Setup) { $Programs += $Setup }
+$Signed = @($Programs | Where-Object { (Get-AuthenticodeSignature $_).Status -eq 'Valid' }).Count -eq $Programs.Count
+$VersionNow = (Select-String -Path (Join-Path $Root 'engine\Cargo.toml') -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+@{
+    version  = $VersionNow
+    commit   = (git -C $Root rev-parse HEAD)
+    releases = $env:LANTERN_RELEASES_REPO
+    signed   = $Signed
+} | ConvertTo-Json | Set-Content -Path (Join-Path $Root 'build\release-info.json') -Encoding utf8

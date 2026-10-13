@@ -11,6 +11,12 @@ function Invoke-Cargo([string[]] $Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "cargo $($Arguments -join ' ') failed" }
 }
 
+# One version for every platform: the engine's, which the Mac app and the releases use too.
+$versionOf = { param($crate) (Select-String -Path (Join-Path $Root "$crate\Cargo.toml") -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value }
+$engineVersion = & $versionOf 'engine'
+$desktopVersion = & $versionOf 'desktop'
+if ($engineVersion -ne $desktopVersion) { throw "desktop/Cargo.toml is $desktopVersion but engine/Cargo.toml is $engineVersion; give both the same version" }
+
 foreach ($crate in 'engine', 'desktop') {
     Write-Host "==> $crate"
     Push-Location (Join-Path $Root $crate)

@@ -17,6 +17,15 @@ if [[ "$(uname -s)" == Linux ]]; then
   export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/build/target}"
 fi
 
+echo "==> version"
+# One version for every platform: the engine's, which the Mac app and the releases use too.
+ENGINE_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/engine/Cargo.toml" | head -1)"
+DESKTOP_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/desktop/Cargo.toml" | head -1)"
+[[ "$ENGINE_VERSION" == "$DESKTOP_VERSION" ]] || {
+  echo "desktop/Cargo.toml is $DESKTOP_VERSION but engine/Cargo.toml is $ENGINE_VERSION; give both the same version" >&2
+  exit 1
+}
+
 echo "==> engine"
 (cd "$ROOT/engine" && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
 
