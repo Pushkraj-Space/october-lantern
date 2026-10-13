@@ -291,6 +291,7 @@ fn card_status(ui: &mut Ui, cx: &Ctx, agent: &Agent, is_new: bool, rect: egui::R
         let capsule = egui::Rect::from_min_size(egui::pos2(rect.right() - size.x, center_y - size.y / 2.0), size);
         ui.painter().rect_filled(capsule, size.y / 2.0, t::FAINT);
         ui.painter().galley(capsule.min + egui::vec2(7.0, 2.0), recent, t::MUTED);
+        ui.interact(capsule, ui.id().with(("recent-chip", &agent.id)), Sense::hover()).on_hover_text(c::recent_help(agent));
     } else {
         ui.painter().galley(egui::pos2(state_left, center_y - galley.size().y / 2.0), galley, color);
     }
@@ -357,6 +358,11 @@ pub fn permission_buttons(ui: &mut Ui, cx: &mut Ctx, agent: &Agent) {
             );
             ui.painter().galley(egui::pos2(left + 18.0, rect.center().y - galley.size().y / 2.0), galley, ink);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title));
+            let response = response.on_hover_text(if allow {
+                "Allow once: presses 1 in the agent's terminal, if this is still the prompt on screen"
+            } else {
+                "Decline (presses Escape), then tell the agent what to do instead"
+            });
             if response.clicked() {
                 cx.emit(UiAction::AnswerPermission { agent_id: agent.id.clone(), prompt_id: prompt_id.clone(), allow });
             }

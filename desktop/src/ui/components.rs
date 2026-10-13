@@ -232,7 +232,7 @@ pub fn state_chip(ui: &mut Ui, agent: &Agent) -> Response {
         ui.painter().rect_filled(rect, rect.height() / 2.0, theme::FAINT);
         ui.painter().galley(rect.min + egui::vec2(7.0, 2.0), galley, theme::MUTED);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), "Recent"));
-        return response;
+        return response.on_hover_text(recent_help(agent));
     }
     let color = if agent.state.wants_you() { theme::AMBER } else { theme::MUTED };
     let galley = ui.painter().layout_no_wrap(theme::state_label(agent.state).into(), theme::font(11.0, Weight::Medium), color);
@@ -241,6 +241,11 @@ pub fn state_chip(ui: &mut Ui, agent: &Agent) -> Response {
     ui.painter().galley(rect.min + egui::vec2(11.0, 0.0), galley, color);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), theme::state_label(agent.state)));
     response
+}
+
+/// The "Recent" chip's help (PanelView.swift `AgentStateChip`).
+pub fn recent_help(agent: &Agent) -> String {
+    format!("A {} session that isn't running now", agent.source.as_deref().unwrap_or("app"))
 }
 
 pub fn state_chip_width(ui: &Ui, agent: &Agent) -> f32 {

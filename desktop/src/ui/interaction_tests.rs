@@ -7,6 +7,7 @@ fn fixture(name: &str) -> crate::app::fixture::Fixture {
         "agents" => include_str!("../../fixtures/panel-agents.json"),
         "inbox" => include_str!("../../fixtures/panel-inbox.json"),
         "chat" => include_str!("../../fixtures/panel-chat.json"),
+        "permission" => include_str!("../../fixtures/panel-permission.json"),
         _ => unreachable!(),
     })
     .unwrap()
@@ -170,5 +171,28 @@ fn non_replyable_windows_chat_keeps_the_hint_and_sends_by_button_or_enter() {
             assert_eq!(actions, vec![UiAction::SendReply { agent_id: "claude:1:1".into() }]);
             assert_eq!(f.inputs.drafts.ticket(), Some(ticket), "only the coordinator acknowledges a send");
         }
+    }
+}
+
+#[test]
+fn permission_buttons_explain_what_they_press() {
+    for (title, help) in [
+        ("Allow", "Allow once: presses 1 in the agent's terminal, if this is still the prompt on screen"),
+        ("Deny", "Decline (presses Escape), then tell the agent what to do instead"),
+    ] {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        let assets = Assets::load(&ctx);
+        let mut f = fixture("permission");
+        let (output, _) = render(&ctx, &assets, &mut f, Vec::new());
+        let pos = text_rect(&output, title).center();
+        render(&ctx, &assets, &mut f, vec![Event::PointerMoved(pos)]);
+        let (output, actions) = render(&ctx, &assets, &mut f, vec![Event::PointerMoved(pos)]);
+        assert!(actions.is_empty());
+        text_rect(&output, help);
     }
 }
