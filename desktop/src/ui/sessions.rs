@@ -334,32 +334,27 @@ fn pick_model(cx: &mut Ctx, kind: &AgentKind, model: Option<String>) {
     cx.view.model_query.clear();
 }
 
+/// SessionViews.swift's model and folder menus: `.menuStyle(.borderlessButton)` with the
+/// indicator hidden, so AppKit draws a plain row, just the symbol and the text (panel-new.png).
 pub fn field(ui: &mut Ui, id: &str, icon: Icon, value: &str) -> Response {
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 31.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), Sense::hover());
     let response = ui.interact(rect, ui.make_persistent_id(id), Sense::click());
-    ui.painter().rect(
-        rect,
-        10.0,
-        t::FAINT,
-        Stroke::new(1.0, if response.has_focus() { t::opacity(t::AMBER, 0.6) } else { t::HAIRLINE }),
-        egui::StrokeKind::Inside,
-    );
+    let ink = if response.is_pointer_button_down_on() { t::white(0.7) } else { t::INK };
     c::paint_icon(
         ui.painter(),
-        Rect::from_center_size(egui::pos2(rect.left() + 18.0, rect.center().y), egui::Vec2::splat(12.5)),
+        Rect::from_center_size(egui::pos2(rect.left() + 11.0, rect.center().y), egui::Vec2::splat(14.0)),
         icon,
-        t::white(0.9),
+        ink,
     );
-    let display = middle_truncate(ui, value, 12.5, Weight::Regular, width - 66.0);
-    let galley = ui.painter().layout_no_wrap(display, t::font(12.5, Weight::Regular), t::white(0.9));
-    ui.painter().galley(egui::pos2(rect.left() + 32.0, rect.center().y - galley.size().y / 2.0), galley, t::INK);
-    c::paint_icon(
-        ui.painter(),
-        Rect::from_center_size(egui::pos2(rect.right() - 16.5, rect.center().y), egui::Vec2::splat(9.0)),
-        Icon::ChevronUpDown,
-        t::white(0.9),
-    );
+    let display = middle_truncate(ui, value, 13.0, Weight::Regular, width - 28.0);
+    let galley = ui.painter().layout_no_wrap(display, t::font(13.0, Weight::Regular), ink);
+    let text = Rect::from_min_size(egui::pos2(rect.left() + 24.0, rect.center().y - galley.size().y / 2.0), galley.size());
+    ui.painter().galley(text.min, galley, ink);
+    if response.has_focus() {
+        let hit = Rect::from_min_max(rect.min, egui::pos2(text.right() + 4.0, rect.bottom()));
+        ui.painter().rect_stroke(hit, 6.0, Stroke::new(1.0, t::opacity(t::AMBER, 0.6)), egui::StrokeKind::Inside);
+    }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), value));
     response
 }
